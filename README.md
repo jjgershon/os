@@ -2,4 +2,4 @@
 os fashtiken
  flupy flupy faloop 
 
-dd
+dd g
