@@ -44,4 +44,15 @@ int generateFeedback(char* resultBuf, const char* guessBuf, const char* codeBuf)
 	return 0;
 }
 
+int my_open (struct inode *inode, struct file *filp);
+ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos);
+ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t *f_pos);
+ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_pos);
+ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_t *f_pos);
+loff_t my_llseek(struct file *filp, loff_t a, int num);
+int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg);
+int my_release(struct inode *inode, struct file *filp);
+
+
+
 #endif
