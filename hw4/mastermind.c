@@ -195,6 +195,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // round hasn't started yet
     // spin_lock(&lock_round_started);
     if (!round_started) {
+    	printk("in function my_read_maker: round hasn't started yet.\n");
         // spin_unlock(&lock_round_started);
         return -EIO;
     }
@@ -202,6 +203,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 
     // Don't have reading permissions
     if ((filp->f_mode & FMODE_READ) == 0) {
+    	printk("in function my_read_maker: Don't have reading permissions.\n");
         return -EACCES; // make sure that this is the correct error
     }
 
@@ -225,6 +227,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // thus we need to use copy_to_user.
     // copy_to_user returns 0 on success
     if (copy_to_user(buf, &guessBuf, count) != 0) {
+    	printk("in function my_read_maker: copy_to_user failed.\n");
         return -EFAULT;
     }
 
@@ -274,7 +277,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     // resultBuf(kernel mode) ---> buf(user mode)
 
     // make sure that the current breaker is the one that wrote to guess buffer last
-    if (!filp->private_data->i_write) {\
+    if (!filp->private_data->i_write) {
     	printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
         return -EPERM; // make sure that this is the correct error
     }
@@ -289,7 +292,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     //spin_unlock(&lock_round_started);
 
     if (filp->private_data->guesses <= 0) {
-    	printk("in function my_read_breaker: round hasn't started yet.\n");
+    	printk("in function my_read_breaker: breaker has 0 guesses left.\n");
         return -EPERM;
     }
 
@@ -306,11 +309,11 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     }
 
     spin_lock(&lock_resultBuf);
-    down(&lock_result_buffer_is_full);
-
 
     // copying from resultBuf to buf
     if (copy_to_user(buf, &resultBuf, count) != 0) {
+    	printk("in function my_read_breaker: copy_to_user failed.\n");
+    	spin_unlock(&lock_resultBuf);
         return -EFAULT;
     }
 
@@ -321,13 +324,13 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         }
     }
 
-    spin_lock(&lock_round_started);
+    //spin_lock(&lock_round_started);
     if (guess_is_correct == 1) {
         filp->private_data->points++;
         round_started = 0;
         printk("The guess was correct!\n");
     }
-    spin_unlock(&lock_round_started);
+    //spin_unlock(&lock_round_started);
 
     // empty guessBuf and resultBuf
     down(&lock_guess_buffer_is_full);
@@ -339,7 +342,6 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     up(&lock_result_buffer_is_full);
 
     spin_unlock(&lock_resultBuf);
-    up(&lock_result_buffer_is_full);
     result 1;
 }
 
