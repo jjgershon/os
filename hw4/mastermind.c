@@ -35,15 +35,15 @@ spinlock_t lock_game_curr_round;
 spinlock_t lock_num_of_players;
 struct semaphore lock_guess_buffer_is_full;
 struct semaphore lock_result_buffer_is_full;
-spinlock_t lock_round_started;
-
 struct semaphore lock_write_guessBuf;
 spinlock_t lock_read_guessBuf;
-
 struct semaphore lock_read_resultBuf;
 spinlock_t lock_write_resultBuf;
-
 spinlock_t lock_write_codeBuf;
+
+// locks for sure list:
+spinlock_t lock_round_started;
+
 
 // parameters to the module
 char* codeBuf;
@@ -204,42 +204,36 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // maker reads from guess buffer and writes it into buf
 
     // round hasn't started yet
-    spin_lock(&lock_round_started);
+    // spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_unlock(&lock_round_started);
-        return -EOF;
+        // spin_unlock(&lock_round_started);
+        return -EIO;
     }
-    spin_unlock(&lock_round_started);
+    // spin_unlock(&lock_round_started);
 
     // Don't have reading permissions
     if ((filp->f_mode & FMODE_READ) == 0) {
-        return -EACCES;
+        return -EACCES; // make sure that this is the correct error
     }
 
-    // "filp" is the file pointer and "count" is the size of the requested data transfer.
-    // The "buff" argument points to the user buffer holding the data to be written or
-    // the empty buffer where the newly read data should be placed.
-    // Finally, "f_pos" is a pointer to a "long offset type" object that indicates the
-    // file position the user is accessing. The return value is a "signed size type".
-
-    down(&lock_guess_buffer_is_full);
+    //down(&lock_guess_buffer_is_full);
     // guess buffer is empty
     if (!guess_buffer_is_full) {
         // there isn't any breaker that can play
-        spin_lock(&lock_num_of_players);
+        //spin_lock(&lock_num_of_players);
         if (!num_of_players) {
-            up(&lock_guess_buffer_is_full);
-            spin_unlock(&lock_num_of_players);
+            //up(&lock_guess_buffer_is_full);
+            //spin_unlock(&lock_num_of_players);
             return EOF;
         // there is a breaker that can play
         } else {
-            up(&lock_guess_buffer_is_full);
-            spin_unlock(&lock_num_of_players);
+            //up(&lock_guess_buffer_is_full);
+            //spin_unlock(&lock_num_of_players);
             // wait until breaker finished writing
             while (!guess_buffer_is_full) {}
         }
     }
-
+============>
     down(&lock_write_guessBuf);
     spin_lock(&lock_read_guessBuf);
 
@@ -297,12 +291,12 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     // resultBuf(kernel mode) ---> buf(user mode)
 
     // round hasn't started yet
-    spin_lock(&lock_round_started);
+    //spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_unlock(&lock_round_started);
+        //spin_unlock(&lock_round_started);
         return -EOF;
     }
-    spin_unlock(&lock_round_started);
+    //spin_unlock(&lock_round_started);
 
     if (filp->private_data->guesses <= 0) {
         return -EPERM;
@@ -364,12 +358,12 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     // buf(user mode) ---> guessBuf(kernel mode)
 
     // round hasn't started yet
-    spin_lock(&lock_round_started);
+    //spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_unlock(&lock_round_started);
+        //spin_unlock(&lock_round_started);
         return -EOF;
     }
-    spin_unlock(&lock_round_started);
+    //spin_unlock(&lock_round_started);
 
     if ((filp->f_mode & FMODE_WRITE) == 0) {
         printk("my_write_breaker Does not have writing permissions\n");
@@ -379,24 +373,24 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     // check if buf contains illegal characters
     for (int i = 0; i < 4; i++) {
         if (buf[i] < '4' || buf[i] > '10') {
-            spin_unlock(&lock_read_guessBuf);
-            up(&lock_write_guessBuf);
             return -EINVAL;
         }
     }
 
-    down(&lock_guess_buffer_is_full);
+    //down(&lock_guess_buffer_is_full);
     // guess buffer is full
     if (guess_buffer_is_full == 1) {
         if (!maker_exists) {
-            up(&lock_guess_buffer_is_full);
+            //up(&lock_guess_buffer_is_full);
             return EOF;
         } else {
-            up(&lock_guess_buffer_is_full);
+            //up(&lock_guess_buffer_is_full);
             // wait until guess buffer is empty
             while (guess_buffer_is_full == 1) {}
         }
     }
+
+    // maker exists, guess buffer is empty
 
     // locking the read lock because we don't want the maker to from
     // the guessBuf while a breaker is writing to it.
@@ -407,6 +401,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     down(&lock_write_guessBuf);
 
     if (copy_from_user(&guessBuf, buf, count) != 0) {
+        spin_unlock(&lock_read_guessBuf);
         up(&lock_write_guessBuf);
         return -EFAULT;
     }
