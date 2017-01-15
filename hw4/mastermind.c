@@ -205,26 +205,20 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         return -EACCES; // make sure that this is the correct error
     }
 
-    //down(&lock_guess_buffer_is_full);
     // guess buffer is empty
     if (!guess_buffer_is_full) {
         // there isn't any breaker that can play
-        //spin_lock(&lock_num_of_players);
         if (!num_of_players) {
-            //up(&lock_guess_buffer_is_full);
-            //spin_unlock(&lock_num_of_players);
+        	printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
             return EOF;
         // there is a breaker that can play
         } else {
-            //up(&lock_guess_buffer_is_full);
-            //spin_unlock(&lock_num_of_players);
             // wait until breaker finished writing
             while (!guess_buffer_is_full) {}
         }
     }
-============>
-    down(&lock_write_guessBuf);
-    spin_lock(&lock_read_guessBuf);
+
+    spin_lock(&lock_guessBuf);
 
     // copy count from kernel buffer to user space buffer.
     // remember that the buff argument is a user-space pointer,
@@ -234,7 +228,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         return -EFAULT;
     }
 
-    spin_unlock(&lock_read_guessBuf);
+    spin_unlock(&lock_guessBuf);
     return 1;
 }
 
