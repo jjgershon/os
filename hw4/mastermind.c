@@ -20,7 +20,7 @@
 #define BUF_SIZE 4
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Jonathan&Ohad");
+MODULE_AUTHOR("Jonathan&Ohad");
 
 
 // Globals:
@@ -33,7 +33,7 @@ int round_started = 0;
 int result_buffer_is_full = 0;
 
 // locks:
-spinlock_t code_;
+spinlock_t lock_codeBuf;
 spinlock_t lock_num_of_players;
 spinlock_t lock_guessBuf;
 spinlock_t lock_resultBuf;
@@ -57,7 +57,7 @@ struct maker_private_data_t {
     int points;
 };
 
-typedef struct private_data_t maker_private_data;
+typedef struct maker_private_data_t maker_private_data;
 
 struct breaker_private_data_t {
     int points;
@@ -66,7 +66,7 @@ struct breaker_private_data_t {
     int i_write;
 };
 
-typedef struct private_data_t breaker_private_data;
+typedef struct breaker_private_data_t breaker_private_data;
 
 
 struct file_operations my_fops_maker = {
@@ -166,6 +166,8 @@ int my_open (struct inode *inode, struct file *filp)
     // minor = 0, the inode is a codemaker
     // todo: need to check if a maker already exists
     if (MINOR(inode->i_rdev == 0)) {
+        maker_private_data* maker_data = filp->private_data;
+
     	if (maker_exists == 1) {
             printk("in function my_open: maker already exists.\n");
             return -EPERM;
@@ -177,23 +179,25 @@ int my_open (struct inode *inode, struct file *filp)
         	printk("in function my_open: allocating maker's filp->private_data failed.\n");
             return -ENOMEM;
         }
-        filp->private_data->points = 0;
+        maker_data->points = 0;
         maker_exists = 1;
     }
 
     // minor = 1, the inode is a codemaker
     if (MINOR(inode->i_rdev == 1)) {
+        breaker_private_data* breaker_data = filp->private_data;
+
         filp->f_op = &my_fops_breaker;
         filp->private_data = (breaker_private_data*)kmalloc(sizeof(struct breaker_private_data_t), GFP_KERNEL);
         if (!filp->private_data) {
         	printk("in function my_open: allocating breaker's filp->private_data failed.\n");
             return -ENOMEM;
         }
-        filp->private_data->points = 0;
-        filp->private_data->guesses = 10;
-        filp->private_data->curr_round = game_curr_round;
+        breaker_data->points = 0;
+        breaker_data->guesses = 10;
+        breaker_data->curr_round = game_curr_round;
         spin_lock(&lock_num_of_players);
-        lock_num_of_players++;
+        num_of_players++;
         spin_unlock(&lock_num_of_players);
     }
 
@@ -205,6 +209,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 {
     // guessBuf(kernel mode) ---> buf(user mode)
     // maker reads from guess buffer and writes it into buf
+
 
     // round hasn't started yet
     spin_lock(&lock_round_started);
@@ -302,8 +307,11 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
 {
     // resultBuf(kernel mode) ---> buf(user mode)
 
+    breaker_private_data* breaker_data = filp->private_data;
+
+
     // make sure that the current breaker is the one that wrote to guess buffer last
-    if (!filp->private_data->i_write) {
+    if (!breaker_data->i_write) {
     	printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
         return -EPERM; // make sure that this is the correct error
     }
@@ -322,7 +330,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     }
     spin_unlock(&lock_round_started);
 
-    if (filp->private_data->guesses <= 0) {
+    if (breaker_data->guesses <= 0) {
     	printk("in function my_read_breaker: breaker has 0 guesses left.\n");
         return -EPERM;
     }
@@ -357,7 +365,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
 
     //spin_lock(&lock_round_started);
     if (guess_is_correct == 1) {
-        filp->private_data->points++;
+        breaker_data->points++;
         round_started = 0;
         printk("The guess was correct!\n");
     }
@@ -373,13 +381,15 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     up(&lock_result_buffer_is_full);
 
     spin_unlock(&lock_resultBuf);
-    result 1;
+    return 1;
 }
 
 
 ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_t *f_pos)
 {
     // buf(user mode) ---> guessBuf(kernel mode)
+
+    breaker_private_data* breaker_data = filp->private_data;
 
     // round hasn't started yet
     spin_lock(&lock_round_started);
@@ -397,7 +407,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     // check if buf contains illegal characters
     for (int i = 0; i < 4; i++) {
-        if (buf[i] < '4' || buf[i] > '10') {
+        if (simple_strtoll(buf[i]) < 4 || simple_strtoll(buf[i]) > 10) {
         	printk("in function my_write_breaker: buf contains illegal characters\n");
             return -EINVAL;
         }
@@ -428,7 +438,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     }
 
     // lowering the number of guesses
-    --filp->breaker_private_data->guesses;
+    --breaker_data->guesses;
 
     down(&lock_guess_buffer_is_full);
     guess_buffer_is_full = 1;
@@ -467,7 +477,15 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
             spin_unlock(&game_curr_round);
 
         case GET_MY_SCORE:
-            return filp->private_data->points;
+            if (MINOR(inode->i_rdev) == 0) {
+                maker_private_data* maker_data = filp->private_data;
+                return maker_data->points;
+            }
+
+            if (MINOR(inode->i_rdev) == 1) {
+                breaker_private_data* breaker_data = filp->private_data;
+                return breaker_data->points;
+            }
         default:
             return -ENOTTY;
     }
@@ -490,10 +508,11 @@ int my_release(struct inode *inode, struct file *filp)
     }
     // minor = 1: codebreaker
     if (MINOR(inode->i_rdev)==1) {
-        if (flip->private_data->guesses) {
+        breaker_private_data* breaker_data = filp->private_data;
+        if (breaker_data->guesses) {
             return -EPERM; // correct????
         }
-        kfree(flip->private_data);
+        kfree(filp->private_data);
         spin_lock(&lock_num_of_players);
         num_of_players--;
         spin_unlock(&lock_num_of_players);
