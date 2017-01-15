@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -e
+
+MAJOR=254
+MAKER=0
+BREAKER=1
+
+#rmmod mastermind
+rm -rf /dev/maker
+rm -rf /dev/breaker
+
+make
+
+insmod ./mastermind.o
+mknod /dev/maker c $MAJOR $MAKER
+mknod /dev/breaker c $MAJOR $BREAKER
+
+gcc test.c -o test -lpthread
+
+./test

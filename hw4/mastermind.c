@@ -22,6 +22,14 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jonathan&Ohad");
 
+int my_open (struct inode *inode, struct file *filp);
+ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos);
+ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t *f_pos);
+ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_pos);
+ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_t *f_pos);
+loff_t my_llseek(struct file *filp, loff_t a, int num);
+int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg);
+int my_release(struct inode *inode, struct file *filp);
 
 // Globals:
 static int my_major = 0;
@@ -356,8 +364,9 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         return -EFAULT;
     }
 
+    int i;
     int guess_is_correct = 1;
-    for (int i = 0; i < 4; i++) {
+    for (i = 0; i < 4; i++) {
         if (resultBuf[i] != '2') {
             guess_is_correct = 0;
         }
@@ -406,12 +415,13 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     }
 
     // check if buf contains illegal characters
-    for (int i = 0; i < 4; i++) {
-        if (simple_strtoll(buf + i, NULL, 10) < 4 || simple_strtoll(buf + i, NULL, 10) > 10) {
-        	printk("in function my_write_breaker: buf contains illegal characters\n");
-            return -EINVAL;
-        }
-    }
+    // int i;
+    // for (i = 0; i < 4; i++) {
+    //     if ( (*(buf + i)) < '4' || (*(buf + i)) > '10') {
+    //     	printk("in function my_write_breaker: buf contains illegal characters\n");
+    //         return -EINVAL;
+    //     }
+    // }
 
     //down(&lock_guess_buffer_is_full);
     // guess buffer is full
