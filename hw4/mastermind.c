@@ -65,6 +65,7 @@ struct breaker_private_data_t {
     int points;
     int guesses;
     int curr_round;
+    int i_write;
 };
 
 typedef struct private_data_t breaker_private_data;
