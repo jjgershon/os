@@ -35,6 +35,7 @@ spinlock_t lock_num_of_players;
 spinlock_t lock_guessBuf;
 spinlock_t lock_resultBuf;
 spinlock lock_round_started;
+spinlock game_curr_round;
 
 struct semaphore lock_guess_buffer_is_full;
 struct semaphore lock_result_buffer_is_full;
@@ -125,6 +126,8 @@ int init_module(void)
     spin_lock_init(&lock_num_of_players);
     spin_lock_init(&lock_guessBuf);
     spin_lock_init(&lock_resultBuf);
+    spin_lock_init(&lock_round_started);
+    spin_lock_init(&game_curr_round);
     init_MUTEX(&lock_guess_buffer_is_full);
     init_MUTEX(&lock_result_buffer_is_full);
     
@@ -153,16 +156,23 @@ int my_open (struct inode *inode, struct file *filp)
     // }
 
     // check flag
-    if (!filp->f_flags & O_RDWR){ // maybe check FMODE_READ and FMODE_WRITE?
+    if (!filp->f_flags & O_RDWR){ 
+    	printk("in function my_open: doesn't have O_RDWR permissions.\n");
         return -EPERM;
     }
 
     // minor = 0, the inode is a codemaker
     // todo: need to check if a maker already exists
     if (MINOR(inode->i_rdev == 0)) {
+    	if (maker_exists == 1) {
+            printk("in function my_open: maker already exists.\n");
+            return -EPERM;
+    	}
+        
         filp->f_op = &my_fops_maker;
         filp->privte_data = (maker_private_data*)kmalloc(sizeof(maker_private_data), GFP_KERNEL);
         if (!filp->private_data) {
+        	printk("in function my_open: allocating maker's filp->private_data failed.\n");
             return -ENOMEM;
         }
         filp->privte_data->points = 0;
@@ -174,6 +184,7 @@ int my_open (struct inode *inode, struct file *filp)
         filp->f_op = &my_fops_breaker;
         filp->privte_data = (breaker_private_data*)kmalloc(sizeof(breaker_private_data), GFP_KERNEL);
         if (!filp->private_data) {
+        	printk("in function my_open: allocating breaker's filp->private_data failed.\n");
             return -ENOMEM;
         }
         filp->privte_data->points = 0;
@@ -283,12 +294,17 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         return -EPERM; // make sure that this is the correct error
     }
 
+    if ((filp->f_mode & FMODE_READ) == 0) {
+        printk("in function my_read_breaker: Does not have reading permissions\n");
+        return -EACCES;
+    }
+
     // round hasn't started yet
     spin_lock(&lock_round_started);
     if (!round_started) {
     	printk("in function my_read_breaker: round hasn't started yet.\n");
         spin_unlock(&lock_round_started);
-        return -EOF;
+        return -EIO;
     }
     spin_unlock(&lock_round_started);
 
@@ -356,7 +372,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     if (!round_started) {
         spin_unlock(&lock_round_started);
         printk("in function my_write_breaker: round hasn't started yet\n");
-        return -EOF;
+        return -EIO;
     }
     spin_unlock(&lock_round_started);
 
