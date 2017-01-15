@@ -266,6 +266,7 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
     if (!round_started) {
         spin_lock(&lock_write_codeBuf);
         if (copy_from_user(&codeBuf, buf, count) != 0) {
+            spin_unlock(&lock_round_started);
             spin_unlock(&lock_write_codeBuf);
             return -EFAULT;
         }
