@@ -355,18 +355,20 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     spin_lock(&lock_round_started);
     if (!round_started) {
         spin_unlock(&lock_round_started);
+        printk("in function my_write_breaker: round hasn't started yet\n");
         return -EOF;
     }
     spin_unlock(&lock_round_started);
 
     if ((filp->f_mode & FMODE_WRITE) == 0) {
-        printk("my_write_breaker Does not have writing permissions\n");
+        printk("in function my_write_breaker: Does not have writing permissions\n");
         return -EACCES;
     }
 
     // check if buf contains illegal characters
     for (int i = 0; i < 4; i++) {
         if (buf[i] < '4' || buf[i] > '10') {
+        	printk("in function my_write_breaker: buf contains illegal characters\n");
             return -EINVAL;
         }
     }
@@ -375,6 +377,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     // guess buffer is full
     if (guess_buffer_is_full == 1) {
         if (!maker_exists) {
+        	printk("in function my_write_breaker: maker does not exist.\n");
             //up(&lock_guess_buffer_is_full);
             return EOF;
         } else {
@@ -386,17 +389,11 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     // maker exists, guess buffer is empty
 
-    // locking the read lock because we don't want the maker to from
-    // the guessBuf while a breaker is writing to it.
-    spin_lock(&lock_read_guessBuf);
-
-    // locking the write lock because we don't want any other
-    // breaker to write into guessBuf.
-    down(&lock_write_guessBuf);
+    spin_lock(&lock_guessBuf);
 
     if (copy_from_user(&guessBuf, buf, count) != 0) {
-        spin_unlock(&lock_read_guessBuf);
-        up(&lock_write_guessBuf);
+        spin_unlock(&lock_guessBuf);
+        printk("in function my_write_breaker: copy_from_user failed.\n");
         return -EFAULT;
     }
 
@@ -407,8 +404,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     guess_buffer_is_full = 1;
     up(&lock_guess_buffer_is_full);
 
-    spin_unlock(&lock_read_guessBuf);
-    up(&lock_write_guessBuf);
+    spin_unlock(&lock_guessBuf);
     return 1;
 }
 
