@@ -31,18 +31,12 @@ int round_started = 0;
 int result_buffer_is_full = 0;
 
 // locks:
-spinlock_t lock_game_curr_round;
 spinlock_t lock_num_of_players;
+spinlock_t lock_guessBuf;
+spinlock_t lock_resultBuf;
+
 struct semaphore lock_guess_buffer_is_full;
 struct semaphore lock_result_buffer_is_full;
-struct semaphore lock_write_guessBuf;
-spinlock_t lock_read_guessBuf;
-struct semaphore lock_read_resultBuf;
-spinlock_t lock_write_resultBuf;
-spinlock_t lock_write_codeBuf;
-
-// locks for sure list:
-spinlock_t lock_round_started;
 
 
 // parameters to the module
@@ -127,18 +121,12 @@ int init_module(void)
     round_started = 0;
     result_buffer_is_full = 0;
 
-
-    spin_lock_init(&lock_game_curr_round);
     spin_lock_init(&lock_num_of_players);
+    spin_lock_init(&lock_guessBuf);
+    spin_lock_init(&lock_resultBuf);
     init_MUTEX(&lock_guess_buffer_is_full);
     init_MUTEX(&lock_result_buffer_is_full);
-    spin_lock_init(&lock_round_started);
-    init_MUTEX(&lock_write_guessBuf);
-    spin_lock_init(&lock_read_guessBuf);
-    init_MUTEX(&lock_read_resultBuf);
-    spin_lock_init(&lock_write_resultBuf);
-    spin_lock_init(&lock_write_codeBuf);
-
+    
     // I think I exaturated a little bit with all the locks
 
     return 0;
@@ -291,22 +279,30 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
 {
     // resultBuf(kernel mode) ---> buf(user mode)
 
+    // make sure that the current breaker is the one that wrote to guess buffer last
+    if (!filp->private_data->i_write) {\
+    	printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
+        return -EPERM; // make sure that this is the correct error
+    }
+
     // round hasn't started yet
     //spin_lock(&lock_round_started);
     if (!round_started) {
+    	printk("in function my_read_breaker: round hasn't started yet.\n");
         //spin_unlock(&lock_round_started);
         return -EOF;
     }
     //spin_unlock(&lock_round_started);
 
     if (filp->private_data->guesses <= 0) {
+    	printk("in function my_read_breaker: round hasn't started yet.\n");
         return -EPERM;
     }
 
     if (!result_buffer_is_full) {
         // maker does not exists
         if (!maker_exists) {
-            printk("in my_read_breaker: maker does not exist\n");
+            printk("in function my_read_breaker: maker does not exist\n");
             return EOF;
         // a maker exists
         } else {
