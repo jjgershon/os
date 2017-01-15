@@ -34,6 +34,7 @@ int result_buffer_is_full = 0;
 spinlock_t lock_num_of_players;
 spinlock_t lock_guessBuf;
 spinlock_t lock_resultBuf;
+spinlock lock_round_started;
 
 struct semaphore lock_guess_buffer_is_full;
 struct semaphore lock_result_buffer_is_full;
@@ -193,13 +194,13 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // maker reads from guess buffer and writes it into buf
 
     // round hasn't started yet
-    // spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
     	printk("in function my_read_maker: round hasn't started yet.\n");
-        // spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         return -EIO;
     }
-    // spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     // Don't have reading permissions
     if ((filp->f_mode & FMODE_READ) == 0) {
@@ -283,13 +284,13 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     }
 
     // round hasn't started yet
-    //spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
     	printk("in function my_read_breaker: round hasn't started yet.\n");
-        //spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         return -EOF;
     }
-    //spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     if (filp->private_data->guesses <= 0) {
     	printk("in function my_read_breaker: breaker has 0 guesses left.\n");
@@ -351,12 +352,12 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     // buf(user mode) ---> guessBuf(kernel mode)
 
     // round hasn't started yet
-    //spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
-        //spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         return -EOF;
     }
-    //spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     if ((filp->f_mode & FMODE_WRITE) == 0) {
         printk("my_write_breaker Does not have writing permissions\n");
@@ -432,7 +433,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
             round_started = 1;
             spin_unlock(&lock_round_started);
             // breaker attempts to start a round
-            if(MINOR(inode->i_rdev) == 1){
+            if (MINOR(inode->i_rdev) == 1) {
                 return -EPERM;
             }
             spin_lock(&game_curr_round);
