@@ -31,6 +31,7 @@ int round_started = 0;
 int result_buffer_is_full = 0;
 
 // locks:
+spinlock_t code_;
 spinlock_t lock_num_of_players;
 spinlock_t lock_guessBuf;
 spinlock_t lock_resultBuf;
@@ -249,35 +250,47 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 
 ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t *f_pos)
 {
+    printk("my_write_maker\n");
     // reads from buf and writes it into result
 
     // If the round hasn’t started - write the contents of buf into the
     // password buffer:
     spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_lock(&lock_write_codeBuf);
+        spin_lock(&lock_codeBuf);
         if (copy_from_user(&codeBuf, buf, count) != 0) {
             spin_unlock(&lock_round_started);
             spin_unlock(&lock_write_codeBuf);
+            printk("staring round-> copy_from_user failed \n");
             return -EFAULT;
         }
-        spin_unlock(&lock_write_codeBuf);
+        spin_unlock(&lock_codeBuf);
+        spin_unlock(&lock_round_started);
+        printk("staring round \n");
+        return 1;
     }
     spin_unlock(&lock_round_started);
 
+    // round started
+    down(lock_result_buffer_is_full);
     if (result_buffer_is_full == 1) {
+        up(lock_result_buffer_is_full);
+        printk("round started -> buffer is full\n");
         return -EBUSY;
     }
+    up(lock_result_buffer_is_full);
 
     // generateFeedback returns 1 if guessBuf and codeBuff are identical
     // and returns 0 otherwise.
 
+    // insert feedback into resultBuf
     generateFeedback(resultBuf, guessBuf, codeBuf);
-
+    
     if (copy_to_user(buf, &resultBuf, count) != 0) {
+        printk("write result to buff -> copy_to_user failed\n");
         return -EFAULT;
     }
-
+    printk("write result to buffer -> success\n");
     return 1;
 }
 
