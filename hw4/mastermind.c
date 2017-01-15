@@ -231,7 +231,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         // there isn't any breaker that can play
         if (!num_of_players) {
         	printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
-            return EOF;
+            return 0; //EOF
         // there is a breaker that can play
         } else {
             // wait until breaker finished writing
@@ -293,7 +293,7 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
     // insert feedback into resultBuf
     generateFeedback(resultBuf, guessBuf, codeBuf);
 
-    if (copy_to_user(buf, &resultBuf, count) != 0) {
+    if (copy_to_user(&resultBuf, buf, count) != 0) {
         printk("write result to buff -> copy_to_user failed\n");
         return -EFAULT;
     }
@@ -338,8 +338,8 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     if (!result_buffer_is_full) {
         // maker does not exists
         if (!maker_exists) {
-            printk("in function my_read_breaker: maker does not exist\n");
-            return EOF;
+            printk("in function my_read_breaker: maker does not exist. return EOF.\n");
+            return 0; //EOF
         // a maker exists
         } else {
             // wait until maker finishes writing the feedback
@@ -419,7 +419,8 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
         if (!maker_exists) {
         	printk("in function my_write_breaker: maker does not exist.\n");
             //up(&lock_guess_buffer_is_full);
-            return EOF;
+            return 0; //EOF
+
         } else {
             //up(&lock_guess_buffer_is_full);
             // wait until guess buffer is empty
