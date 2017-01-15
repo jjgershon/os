@@ -34,7 +34,7 @@ int result_buffer_is_full = 0;
 spinlock_t lock_num_of_players;
 spinlock_t lock_guessBuf;
 spinlock_t lock_resultBuf;
-spinlock lock_round_started;
+spinlock_t lock_round_started;
 
 struct semaphore lock_guess_buffer_is_full;
 struct semaphore lock_result_buffer_is_full;
