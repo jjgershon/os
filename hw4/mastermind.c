@@ -407,7 +407,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     // check if buf contains illegal characters
     for (int i = 0; i < 4; i++) {
-        if (simple_strtoll(buf[i]) < 4 || simple_strtoll(buf[i]) > 10) {
+        if (simple_strtoll(buf + i, NULL, 10) < 4 || simple_strtoll(buf + i, NULL, 10) > 10) {
         	printk("in function my_write_breaker: buf contains illegal characters\n");
             return -EINVAL;
         }
