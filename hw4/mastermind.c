@@ -14,6 +14,7 @@
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
+#include <linux/wait.h>
 
 #include "mastermind.h"
 #define MODULE_NAME "MASTERMIND"
@@ -315,7 +316,7 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
     }
 
     spin_lock(&lock_result_buffer_is_full);
-    result_buffer_is_full == 1;
+    result_buffer_is_full = 1;
     spin_unlock(&lock_result_buffer_is_full);
 
     wake_up_interruptible(&breaker_result_queue);
@@ -386,16 +387,16 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         }
     }
 
-    spin_lock(&lock_round_started);
     if (guess_is_correct == 1) {
         breaker_data->points++;
+        spin_lock(&lock_round_started);
         round_started = 0;
+        spin_unlock(&lock_round_started);
         printk("The guess was correct!\n");
-        while (&lock_breakers_guessBuf->val == 0) {
+        while (&lock_breakers_guessBuf.wait) {
             up(&lock_breakers_guessBuf);
         }
     }
-    spin_unlock(&lock_round_started);
 
     // empty guessBuf and resultBuf
     spin_lock(&lock_guess_buffer_is_full);
@@ -460,7 +461,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
         // }
     }
 
-    if (down_interruptible(&lock_breakers_guessBuf) {
+    if (down_interruptible(&lock_breakers_guessBuf)) {
         return -ERESTARTSYS;
     }
 
