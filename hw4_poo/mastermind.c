@@ -60,9 +60,9 @@ wait_queue_head_t maker_guess_queue;
 wait_queue_head_t breaker_result_queue;
 
 // parameters to the module
-char codeBuf[4] = {'0'};
-char guessBuf[4] = {'0'};
-char resultBuf[4] = {'0'}; // feedback buffer
+char codeBuf[4] = {0};
+char guessBuf[4] = {0};
+char resultBuf[4] = {0}; // feedback buffer
 
 //MODULE_PARM(codeBuf,"s");
 //MODULE_PARM(guessBuf,"s");
@@ -240,8 +240,10 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         // there is a breaker that can play
         } else {
             spin_unlock(&lock_num_of_players);
-            // wait until breaker finished writing
-            wait_event_interruptible(maker_guess_queue, guess_buffer_is_full == 1);
+            int wait_res = wait_event_interruptible(maker_guess_queue, guess_buffer_is_full == 1);
+            if (wait_res ==  -ERESTARTSYS) {
+                return -EINTR;
+            }
         }
     }
 
@@ -255,7 +257,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     int res = copy_to_user(buf, resultBuf, sizeof(resultBuf));
     if (res != 0) {
     	printk("in function my_read_maker: copy_to_user failed.\n");
-        return -EFAULT;
+        return res;
     }
     printk("\nexit my_read_maker\n");
 
@@ -285,7 +287,7 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
             spin_unlock(&lock_codeBuf);
             spin_unlock(&lock_round_started);
             printk("staring round-> copy_from_user failed \n");
-            return -EFAULT;
+            return res;
         }
         spin_unlock(&lock_codeBuf);
         spin_unlock(&lock_round_started);
@@ -316,7 +318,7 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
 
     if (res != 0) {
         printk("write result to buff -> copy_to_user failed\n");
-        return -EFAULT;
+        return res;
     }
 
     spin_lock(&lock_result_buffer_is_full);
@@ -375,7 +377,10 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         } else {
             // wait until maker finishes writing the feedback
             spin_unlock(&lock_maker_exists);
-            wait_event_interruptible(breaker_result_queue, result_buffer_is_full == 1);
+            int wait_res = wait_event_interruptible(breaker_result_queue, result_buffer_is_full == 1);
+            if (wait_res ==  -ERESTARTSYS) {
+                return -EINTR;
+            }
         }
     }
 
@@ -385,7 +390,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     if (res != 0) {
     	printk("in function my_read_breaker: copy_to_user failed.\n");
     	//spin_unlock(&lock_resultBuf);
-        return -EFAULT;
+        return res;
     }
 
     int i;
@@ -488,7 +493,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     if (res != 0) {
         up(&lock_breakers_guessBuf);
         printk("in function my_write_breaker: copy_from_user failed.\n");
-        return -EFAULT;
+        return res;
     }
 
     // lowering the number of guesses
