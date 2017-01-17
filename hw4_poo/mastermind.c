@@ -229,11 +229,14 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         return -EACCES; // make sure that this is the correct error
     }
 
+    maker_private_data* maker_data = filp->private_data;
+
     // guess buffer is empty
     if (!guess_buffer_is_full) {
         // there isn't any breaker that can play
         spin_lock(&lock_num_of_players);
         if (!num_of_players) {
+            maker_data->points++;
         	printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
             spin_unlock(&lock_num_of_players);
             return 0; //EOF
@@ -384,6 +387,14 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         }
     }
 
+    spin_lock(&lock_round_started);
+    if (!round_started) {
+        printk("in function my_read_breaker: round hasn't started yet.\n");
+        spin_unlock(&lock_round_started);
+        return -EIO;
+    }
+    spin_unlock(&lock_round_started);
+
     // copying from resultBuf to buf
     int res = copy_to_user(buf, resultBuf, sizeof(resultBuf));
 
@@ -401,14 +412,22 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         }
     }
 
+    // breaker guessed correctly
     if (guess_is_correct == 1) {
         breaker_data->points++;
         spin_lock(&lock_round_started);
         round_started = 0;
         spin_unlock(&lock_round_started);
         printk("The guess was correct!\n");
-
         up(&lock_breakers_guessBuf);
+    }
+
+    //
+    if (!num_of_players && guess_is_correct == 0) {
+        spin_lock(&lock_round_started);
+        round_started = 0;
+        spin_unlock(&lock_round_started);
+        // add 1 to maker score
     }
 
     // empty guessBuf and resultBuf
@@ -443,9 +462,20 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     }
     spin_unlock(&lock_round_started);
 
+    if (breaker_data->curr_round < game_curr_round) {
+        breaker_data->curr_round = game_curr_round;
+        breaker_data->guesses = 10;
+        breaker_data->i_write = 0;
+    }
+
     if ((filp->f_mode & FMODE_WRITE) == 0) {
         printk("in function my_write_breaker: Does not have writing permissions\n");
         return -EACCES;
+    }
+
+    if (breaker_data->guesses <= 0) {
+        printk("in function my_read_breaker: breaker has 0 guesses left.\n");
+        return -EPERM;
     }
 
     // check if buf contains illegal characters
@@ -521,28 +551,49 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
     switch (cmd) {
         case ROUND_START:
-            if (arg < 4 || arg > 10) {
-                return -EINVAL;
-            }
-            range = arg;
+            // maker:
+            if (MINOR(inode->i_rdev) == 0) {
 
-            spin_lock(&lock_round_started);
-            if (round_started == 1) {
+                if (arg < 4 || arg > 10) {
+                    return -EINVAL;
+                }
+
+                range = arg;
+
+                spin_lock(&lock_round_started);
+
+                if (round_started == 1) {
+                    spin_unlock(&lock_round_started);
+                    return -EBUSY;
+                }
+
+                // breaker attempts to start a round
+                if (MINOR(inode->i_rdev) == 1) {
+                    spin_unlock(&lock_round_started);
+                    return -EPERM;
+                }
+
+
+                // maker_exists = 0;
+                spin_lock(&lock_guess_buffer_is_full);
+                guess_buffer_is_full = 0;
+                spin_unlock(&lock_guess_buffer_is_full);
+
+                spin_lock(&lock_result_buffer_is_full);
+                result_buffer_is_full = 0;
+                spin_unlock(&lock_result_buffer_is_full);
+
+                //spin_lock(&lock_game_curr_round);
+                game_curr_round++;
+                //spin_unlock(&lock_game_curr_round);
+                round_started = 1;
                 spin_unlock(&lock_round_started);
-                return -EBUSY;
             }
-
-            // breaker attempts to start a round
+            // breaker:
             if (MINOR(inode->i_rdev) == 1) {
-                spin_unlock(&lock_round_started);
                 return -EPERM;
             }
 
-            //spin_lock(&lock_game_curr_round);
-            game_curr_round++;
-            //spin_unlock(&lock_game_curr_round);
-            round_started = 1;
-            spin_unlock(&lock_round_started);
             break;
 
         case GET_MY_SCORE:
@@ -582,14 +633,10 @@ int my_release(struct inode *inode, struct file *filp)
     }
     // minor = 1: codebreaker
     if (MINOR(inode->i_rdev) == 1) {
-        breaker_private_data* breaker_data = filp->private_data;
-        if (breaker_data->guesses) {
-            return -EPERM; // correct????
-        }
-        kfree(filp->private_data);
         spin_lock(&lock_num_of_players);
         num_of_players--;
         spin_unlock(&lock_num_of_players);
+        kfree(filp->private_data);
     }
     printk("\nexit ioctl\n");
 
