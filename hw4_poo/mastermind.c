@@ -336,6 +336,15 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     // resultBuf(kernel mode) ---> buf(user mode)
     printk("\nentered my_read_breaker\n");
 
+    // round hasn't started yet
+    spin_lock(&lock_round_started);
+    if (!round_started) {
+        printk("in function my_read_breaker: round hasn't started yet.\n");
+        spin_unlock(&lock_round_started);
+        return -EIO;
+    }
+    spin_unlock(&lock_round_started);
+
     breaker_private_data* breaker_data = filp->private_data;
 
     printk("my_read_breaker: after breaker_data\n");
@@ -349,15 +358,6 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         printk("in function my_read_breaker: Does not have reading permissions\n");
         return -EACCES;
     }
-
-    // round hasn't started yet
-    spin_lock(&lock_round_started);
-    if (!round_started) {
-    	printk("in function my_read_breaker: round hasn't started yet.\n");
-        spin_unlock(&lock_round_started);
-        return -EIO;
-    }
-    spin_unlock(&lock_round_started);
 
     if (breaker_data->guesses <= 0) {
     	printk("in function my_read_breaker: breaker has 0 guesses left.\n");
