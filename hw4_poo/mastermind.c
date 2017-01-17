@@ -40,18 +40,17 @@ int maker_exists = 0;
 int guess_buffer_is_full = 0;
 int round_started = 0;
 int result_buffer_is_full = 0;
-int range = 0;
+unsigned long range = 0;
 
 
 // locks:
 spinlock_t lock_codeBuf;
 spinlock_t lock_num_of_players;
 spinlock_t lock_resultBuf;
-spinlock_t lock_game_curr_round;
+//spinlock_t lock_game_curr_round;
 spinlock_t lock_round_started;
 spinlock_t lock_guess_buffer_is_full;
 spinlock_t lock_result_buffer_is_full;
-
 spinlock_t lock_maker_exists;
 
 struct semaphore lock_breakers_guessBuf;
@@ -61,9 +60,9 @@ wait_queue_head_t maker_guess_queue;
 wait_queue_head_t breaker_result_queue;
 
 // parameters to the module
-char* codeBuf;
-char* guessBuf;
-char* resultBuf; // feedback buffer
+char codeBuf[4] = {'0'};
+char guessBuf[4] = {'0'};
+char resultBuf[4] = {'0'}; // feedback buffer
 
 //MODULE_PARM(codeBuf,"s");
 //MODULE_PARM(guessBuf,"s");
@@ -118,30 +117,6 @@ int init_module(void)
         return my_major;
     }
 
-    // allocate buffers
-    codeBuf = kmalloc(sizeof(char)*BUF_SIZE, GFP_KERNEL);
-    if (!codeBuf) {
-        return -ENOMEM;
-    }
-
-    guessBuf = kmalloc(sizeof(char)*BUF_SIZE, GFP_KERNEL);
-    if (!guessBuf) {
-        kfree(codeBuf);
-        return -ENOMEM;
-    }
-
-    resultBuf = kmalloc(sizeof(char)*BUF_SIZE, GFP_KERNEL);
-    if (!resultBuf) {
-        kfree(guessBuf);
-        kfree(codeBuf);
-        return -ENOMEM;
-    }
-
-    int i;
-    for (i = 0; i < 4 ; i++) {
-        codeBuf[i] = '0';
-    }
-
     game_curr_round = 0;
     num_of_players = 0;
     maker_exists = 0;
@@ -153,7 +128,7 @@ int init_module(void)
     spin_lock_init(&lock_guess_buffer_is_full);
     spin_lock_init(&lock_resultBuf);
     spin_lock_init(&lock_round_started);
-    spin_lock_init(&game_curr_round);
+    //spin_lock_init(&game_curr_round);
     spin_lock_init(&lock_result_buffer_is_full);
     spin_lock_init(&lock_maker_exists);
 
@@ -171,20 +146,12 @@ void cleanup_module(void)
 {
     unregister_chrdev(my_major, MODULE_NAME);
 
-    // deallocate all the buffers
-    kfree(codeBuf);
-    kfree(guessBuf);
-    kfree(resultBuf);
     return;
 }
 
 
 int my_open (struct inode *inode, struct file *filp)
 {
-    // if (!inode || !filp) {
-
-    // }
-
     printk("\nDEBUG: entered my_open\n");
 
     // check flag
@@ -192,6 +159,8 @@ int my_open (struct inode *inode, struct file *filp)
     	printk("in function my_open: doesn't have O_RDWR permissions.\n");
         return -EPERM;
     }
+
+    printk("\n%d\n",MINOR(inode->i_rdev));
 
     // minor = 0, the inode is a codemaker
     if (MINOR(inode->i_rdev) == 0) {
@@ -202,7 +171,6 @@ int my_open (struct inode *inode, struct file *filp)
             spin_unlock(&lock_maker_exists);
             return -EPERM;
     	}
-        //spin_unlock(&lock_maker_exists);
 
         filp->f_op = &my_fops_maker;
         filp->private_data = (maker_private_data*)kmalloc(sizeof(struct maker_private_data_t), GFP_KERNEL);
@@ -213,7 +181,6 @@ int my_open (struct inode *inode, struct file *filp)
         }
         maker_private_data* maker_data = filp->private_data;
         maker_data->points = 0;
-        //spin_lock(&lock_maker_exists);
         maker_exists = 1;
         spin_unlock(&lock_maker_exists);
         printk("\nmaker opened successfuly\n");
@@ -245,7 +212,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // guessBuf(kernel mode) ---> buf(user mode)
     // maker reads from guess buffer and writes it into buf
 
-    printk("my_read_maker\n");
+    printk("entered my_read_maker\n");
 
     // round hasn't started yet
     spin_lock(&lock_round_started);
@@ -265,7 +232,6 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // guess buffer is empty
     if (!guess_buffer_is_full) {
         // there isn't any breaker that can play
-        printk("\nread_maker: inside if guess_buffer_is_full\n");
         spin_lock(&lock_num_of_players);
         if (!num_of_players) {
         	printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
@@ -275,9 +241,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         } else {
             spin_unlock(&lock_num_of_players);
             // wait until breaker finished writing
-            printk("\nbefore wait queue\n");
             wait_event_interruptible(maker_guess_queue, guess_buffer_is_full == 1);
-            printk("\nafter wait queue\n");
         }
     }
 
@@ -286,13 +250,14 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // thus we need to use copy_to_user.
     // copy_to_user returns 0 on success
 
-    // generateFeedback(resultBuf, guessBuf, codeBuf);
+    generateFeedback(resultBuf, guessBuf, codeBuf);
 
-    if (copy_to_user(buf, resultBuf, 4*sizeof(char)) != 0) {
+    int res = copy_to_user(buf, resultBuf, sizeof(resultBuf));
+    if (res != 0) {
     	printk("in function my_read_maker: copy_to_user failed.\n");
         return -EFAULT;
     }
-    printk("\nbefore exiting\n");
+    printk("\nexit my_read_maker\n");
 
     return 1;
 }
@@ -308,9 +273,17 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
     spin_lock(&lock_round_started);
     if (!round_started) {
         spin_lock(&lock_codeBuf);
-        if (copy_from_user(&codeBuf, buf, 4*sizeof(char)) != 0) {
+
+        if (count != sizeof(codeBuf)) {
+            spin_unlock(&lock_codeBuf);
             spin_unlock(&lock_round_started);
-            spin_unlock(&lock_write_codeBuf);
+            return -EINVAL;
+        }
+
+        int res = copy_from_user(codeBuf, buf, count);
+        if (res != 0) {
+            spin_unlock(&lock_codeBuf);
+            spin_unlock(&lock_round_started);
             printk("staring round-> copy_from_user failed \n");
             return -EFAULT;
         }
@@ -335,7 +308,13 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
 
     // insert feedback into resultBuf
 
-    if (copy_from_user(&resultBuf, buf, count) != 0) {
+    if (count != sizeof(resultBuf)) {
+        return -EINVAL;
+    }
+
+    int res = copy_from_user(resultBuf, buf, count);
+
+    if (res != 0) {
         printk("write result to buff -> copy_to_user failed\n");
         return -EFAULT;
     }
@@ -355,8 +334,7 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
 ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
 {
     // resultBuf(kernel mode) ---> buf(user mode)
-    printk("\nmy_read_breaker\n");
-
+    printk("\nentered my_read_breaker\n");
 
     breaker_private_data* breaker_data = filp->private_data;
 
@@ -386,8 +364,6 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         return -EPERM;
     }
 
-    printk("my_read_breaker: poop1\n");
-
     if (!result_buffer_is_full) {
         // maker does not exists
         spin_lock(&lock_maker_exists);
@@ -399,24 +375,18 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         } else {
             // wait until maker finishes writing the feedback
             spin_unlock(&lock_maker_exists);
-            printk("my_read_breaker: before wait_queue\n");
             wait_event_interruptible(breaker_result_queue, result_buffer_is_full == 1);
-            printk("my_read_breaker: after wait_queue\n");
         }
     }
 
-    printk("my_read_breaker: poop2\n");
-
-    //spin_lock(&lock_resultBuf);
-
     // copying from resultBuf to buf
-    if (copy_to_user(buf, &resultBuf, 4*sizeof(char)) != 0) {
+    int res = copy_to_user(buf, resultBuf, sizeof(resultBuf));
+
+    if (res != 0) {
     	printk("in function my_read_breaker: copy_to_user failed.\n");
     	//spin_unlock(&lock_resultBuf);
         return -EFAULT;
     }
-
-    printk("my_read_breaker: poop3\n");
 
     int i;
     int guess_is_correct = 1;
@@ -426,17 +396,14 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         }
     }
 
-    printk("my_read_breaker: poop4\n");
-
     if (guess_is_correct == 1) {
         breaker_data->points++;
         spin_lock(&lock_round_started);
         round_started = 0;
         spin_unlock(&lock_round_started);
         printk("The guess was correct!\n");
-        while (&lock_breakers_guessBuf.wait) {
-            up(&lock_breakers_guessBuf);
-        }
+
+        up(&lock_breakers_guessBuf);
     }
 
     // empty guessBuf and resultBuf
@@ -448,11 +415,9 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     result_buffer_is_full = 0;
     spin_unlock(&lock_result_buffer_is_full);
 
-    //spin_unlock(&lock_resultBuf);
-
     // unlock
     up(&lock_breakers_guessBuf);
-    printk("my_read_breaker: finished\n");
+    printk("exit my_read_breaker\n");
     return 1;
 }
 
@@ -487,10 +452,6 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
         }
     }
 
-    //spin_lock(&lock_guess_buffer_is_full);
-    // guess buffer is full
-
-
     if (guess_buffer_is_full == 1) {
         spin_lock(&lock_maker_exists);
         if (!maker_exists) {
@@ -500,30 +461,31 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
             return 0; //EOF
         }
         spin_unlock(&lock_maker_exists);
-        // } else {
-        //     // guessBuf is full, maker exists
-        //     // wait until guess buffer is empty
-
-        // }
     }
 
-printk("my_write_breaker: before\n");
     if (down_interruptible(&lock_breakers_guessBuf)) {
         return -ERESTARTSYS;
     }
-printk("my_write_breaker: after\n");
+
     // breaker might catch the lock after the round ended,
     // in this case, exit the function.
     spin_lock(&lock_round_started);
     if (!round_started) {
-        up(&lock_breakers_guessBuf);
         spin_unlock(&lock_round_started);
+        up(&lock_breakers_guessBuf);
         printk("in function my_write_breaker: round hasn't started yet\n");
         return -EIO;
     }
     spin_unlock(&lock_round_started);
 
-    if (copy_from_user(&guessBuf, buf, 4*sizeof(char)) != 0) {
+    if (count != sizeof(guessBuf)) {
+        up(&lock_breakers_guessBuf);
+        return -EINVAL;
+    }
+
+    int res = copy_from_user(guessBuf, buf, count);
+
+    if (res != 0) {
         up(&lock_breakers_guessBuf);
         printk("in function my_write_breaker: copy_from_user failed.\n");
         return -EFAULT;
@@ -550,31 +512,32 @@ loff_t my_llseek(struct file *filp, loff_t a, int num)
 
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
+    printk("\nentered ioctl\n");
+
     switch (cmd) {
         case ROUND_START:
             if (arg < 4 || arg > 10) {
                 return -EINVAL;
             }
             range = arg;
-            printk("\npoop1\n");
+
             spin_lock(&lock_round_started);
             if (round_started == 1) {
                 spin_unlock(&lock_round_started);
                 return -EBUSY;
             }
-            printk("\npoop2\n");
+
             // breaker attempts to start a round
             if (MINOR(inode->i_rdev) == 1) {
                 spin_unlock(&lock_round_started);
                 return -EPERM;
             }
-            printk("\npoop3\n");
-            spin_lock(&lock_game_curr_round);
+
+            //spin_lock(&lock_game_curr_round);
             game_curr_round++;
-            spin_unlock(&lock_game_curr_round);
+            //spin_unlock(&lock_game_curr_round);
             round_started = 1;
             spin_unlock(&lock_round_started);
-            printk("\npoop4\n");
             break;
 
         case GET_MY_SCORE:
@@ -591,13 +554,14 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         default:
             return -ENOTTY;
     }
-    printk("\npoop5\n");
+    printk("\nexit ioctl\n");
     return 1;
 }
 
 
 int my_release(struct inode *inode, struct file *filp)
 {
+    printk("\nenter ioctl\n");
     // minor = 0: codemaker
     if (MINOR(inode->i_rdev) == 0) {
         spin_lock(&lock_round_started);
@@ -622,6 +586,8 @@ int my_release(struct inode *inode, struct file *filp)
         num_of_players--;
         spin_unlock(&lock_num_of_players);
     }
+    printk("\nexit ioctl\n");
+
     return 0;
 }
 
