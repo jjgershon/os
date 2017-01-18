@@ -213,9 +213,11 @@ int my_open (struct inode *inode, struct file *filp)
         breaker_data->guesses = 10;
         breaker_data->curr_round = game_curr_round;
         spin_lock(&lock_num_of_players);
+        spin_lock(&lock_round_started);
         if (round_started == 1) {
             num_of_players++;
         }
+        spin_unlock(&lock_round_started);
         printk("\nmy_open: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
     }
@@ -232,13 +234,13 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     printk("entered my_read_maker\n");
 
     // round hasn't started yet
-    //spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
     	printk("in function my_read_maker: round hasn't started yet.\n");
-        //spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         return -EIO;
     }
-    //spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     // Don't have reading permissions
     if ((filp->f_mode & FMODE_READ) == 0) {
@@ -276,13 +278,13 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         }
     }
 
-    //spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
         printk("in function my_read_maker: round hasn't started yet.\n");
-        //spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         return -EIO;
     }
-    //spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     generateFeedback(resultBuf, guessBuf, codeBuf);
 
@@ -481,13 +483,13 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     printk("my_write_breaker\n");
 
     // round hasn't started yet
-    //spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
-        //spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         printk("in function my_write_breaker: round hasn't started yet\n");
         return -EIO;
     }
-    //spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     if (breaker_data->curr_round < game_curr_round) {
         breaker_data->curr_round = game_curr_round;
@@ -535,14 +537,14 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     // breaker might catch the lock after the round ended,
     // in this case, exit the function.
-    //spin_lock(&lock_round_started);
+    spin_lock(&lock_round_started);
     if (!round_started) {
-        //spin_unlock(&lock_round_started);
+        spin_unlock(&lock_round_started);
         up(&lock_breakers_guessBuf);
         printk("in function my_write_breaker: round hasn't started yet\n");
         return -EIO;
     }
-    //spin_unlock(&lock_round_started);
+    spin_unlock(&lock_round_started);
 
     if (count != sizeof(guessBuf)) {
         up(&lock_breakers_guessBuf);
@@ -594,6 +596,10 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                     return -EINVAL;
                 }
                 range = arg;
+
+                if (game_curr_round > -1) {
+                    num_of_players = 0;
+                }
 
                 spin_lock(&lock_round_started);
                 if (round_started == 1) {
@@ -662,6 +668,10 @@ int my_release(struct inode *inode, struct file *filp)
         }
         round_started = 0;
         num_of_players = 0;
+        game_curr_round = -1;
+
+        guess_buffer_is_full = 0;
+        result_buffer_is_full = 0;
 
         spin_lock(&lock_maker_points);
         maker_points = 0;
@@ -686,7 +696,11 @@ int my_release(struct inode *inode, struct file *filp)
         }
 
         if (!num_of_players) {
+            spin_lock(&lock_round_started);
             round_started = 0;
+            spin_unlock(&lock_round_started);
+            guess_buffer_is_full = 0;
+            result_buffer_is_full = 0;
         }
 
         printk("\nmy_release: num_of_players=%d\n",num_of_players);
