@@ -196,7 +196,7 @@ int my_open (struct inode *inode, struct file *filp)
         printk("\nmaker opened successfuly\n");
     }
 
-    // minor = 1, the inode is a codemaker
+    // minor = 1, the inode is a codebreaker
     if (MINOR(inode->i_rdev) == 1) {
         filp->f_op = &my_fops_breaker;
         filp->private_data = (breaker_private_data*)kmalloc(sizeof(struct breaker_private_data_t), GFP_KERNEL);
@@ -207,9 +207,10 @@ int my_open (struct inode *inode, struct file *filp)
         breaker_private_data* breaker_data = filp->private_data;
         breaker_data->points = 0;
         breaker_data->guesses = 10;
-        breaker_data->curr_round = game_curr_round;
+        breaker_data->curr_round = -1;
         spin_lock(&lock_num_of_players);
-        num_of_players++;
+        //num_of_players++;
+        printk("\nmy_open: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
     }
     printk("\nopen finished successfuly\n");
@@ -247,7 +248,7 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         spin_lock(&lock_num_of_players);
         if (!num_of_players) {
 
-            maker_data->points++;
+            //maker_data->points++;
             spin_lock(&lock_maker_points);
             maker_points++;
             spin_unlock(&lock_maker_points);
@@ -482,6 +483,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
         breaker_data->curr_round = game_curr_round;
         spin_lock(&lock_num_of_players);
         num_of_players++;
+        printk("\nmy_write_breaker: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
         breaker_data->guesses = 10;
         breaker_data->i_write = 0;
@@ -550,6 +552,7 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     if (!breaker_data->guesses) {
         num_of_players--;
+        printk("\nmy_write_breaker: num_of_players=%d\n",num_of_players);
     }
 
     spin_lock(&lock_guess_buffer_is_full);
@@ -580,11 +583,9 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                 if (arg < 4 || arg > 10) {
                     return -EINVAL;
                 }
-
                 range = arg;
 
                 spin_lock(&lock_round_started);
-
                 if (round_started == 1) {
                     spin_unlock(&lock_round_started);
                     return -EBUSY;
@@ -606,7 +607,9 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                 spin_unlock(&lock_result_buffer_is_full);
 
                 //spin_lock(&lock_game_curr_round);
+
                 game_curr_round++;
+
                 //spin_unlock(&lock_game_curr_round);
                 round_started = 1;
                 spin_unlock(&lock_round_started);
@@ -648,6 +651,7 @@ int my_release(struct inode *inode, struct file *filp)
             return -EBUSY;
         }
         round_started = 0;
+        num_of_players = 0;
 
         spin_lock(&lock_maker_points);
         maker_points = 0;
@@ -663,6 +667,7 @@ int my_release(struct inode *inode, struct file *filp)
     if (MINOR(inode->i_rdev) == 1) {
         spin_lock(&lock_num_of_players);
         num_of_players--;
+        printk("\nmy_release: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
         kfree(filp->private_data);
     }
