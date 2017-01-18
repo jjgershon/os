@@ -41,7 +41,6 @@ int guess_buffer_is_full = 0;
 int round_started = 0;
 int result_buffer_is_full = 0;
 unsigned long range = 0;
-
 int maker_points = 0;
 
 
@@ -54,6 +53,8 @@ spinlock_t lock_round_started;
 spinlock_t lock_guess_buffer_is_full;
 spinlock_t lock_result_buffer_is_full;
 spinlock_t lock_maker_exists;
+
+spinlock_t lock_maker_points;
 
 struct semaphore lock_breakers_guessBuf;
 
@@ -125,6 +126,7 @@ int init_module(void)
     guess_buffer_is_full = 0;
     round_started = 0;
     result_buffer_is_full = 0;
+    maker_points = 0;
 
     spin_lock_init(&lock_num_of_players);
     spin_lock_init(&lock_guess_buffer_is_full);
@@ -133,6 +135,8 @@ int init_module(void)
     //spin_lock_init(&game_curr_round);
     spin_lock_init(&lock_result_buffer_is_full);
     spin_lock_init(&lock_maker_exists);
+
+    spin_lock_init(&lock_maker_points);
 
     init_MUTEX(&lock_breakers_guessBuf);
     init_waitqueue_head(&maker_guess_queue);
@@ -182,6 +186,10 @@ int my_open (struct inode *inode, struct file *filp)
             return -ENOMEM;
         }
         maker_private_data* maker_data = filp->private_data;
+
+        spin_lock(&lock_maker_points);
+        maker_points = 0;
+        spin_unlock(&lock_maker_points);
         maker_data->points = 0;
         maker_exists = 1;
         spin_unlock(&lock_maker_exists);
@@ -240,6 +248,9 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         if (!num_of_players) {
 
             maker_data->points++;
+            spin_lock(&lock_maker_points);
+            maker_points++;
+            spin_unlock(&lock_maker_points);
 
             printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
             spin_unlock(&lock_num_of_players);
@@ -429,7 +440,10 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         spin_lock(&lock_round_started);
         round_started = 0;
         spin_unlock(&lock_round_started);
-        // add 1 to maker score
+
+        spin_lock(&lock_maker_points);
+        maker_points++;
+        spin_unlock(&lock_maker_points);
     }
 
     // empty guessBuf and resultBuf
@@ -466,6 +480,9 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     if (breaker_data->curr_round < game_curr_round) {
         breaker_data->curr_round = game_curr_round;
+        spin_lock(&lock_num_of_players);
+        num_of_players++;
+        spin_unlock(&lock_num_of_players);
         breaker_data->guesses = 10;
         breaker_data->i_write = 0;
     }
@@ -530,6 +547,10 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     // lowering the number of guesses
     --breaker_data->guesses;
+
+    if (!breaker_data->guesses) {
+        num_of_players--;
+    }
 
     spin_lock(&lock_guess_buffer_is_full);
     guess_buffer_is_full = 1;
@@ -600,7 +621,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
         case GET_MY_SCORE:
             if (MINOR(inode->i_rdev) == 0) {
                 maker_private_data* maker_data = filp->private_data;
-                return maker_data->points;
+                return maker_points;
             }
 
             if (MINOR(inode->i_rdev) == 1) {
@@ -627,6 +648,11 @@ int my_release(struct inode *inode, struct file *filp)
             return -EBUSY;
         }
         round_started = 0;
+
+        spin_lock(&lock_maker_points);
+        maker_points = 0;
+        spin_unlock(&lock_maker_points);
+
         spin_lock(&lock_maker_exists);
         maker_exists = 0;
         spin_unlock(&lock_maker_exists);
