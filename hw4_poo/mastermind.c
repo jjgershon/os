@@ -15,6 +15,8 @@
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
+//#include <sys/types.h>
+//#include <unistd.h>
 
 #include "mastermind.h"
 #define MODULE_NAME "MASTERMIND"
@@ -539,8 +541,8 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     // in this case, exit the function.
     spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_unlock(&lock_round_started);
         up(&lock_breakers_guessBuf);
+        spin_unlock(&lock_round_started);
         printk("in function my_write_breaker: round hasn't started yet\n");
         return -EIO;
     }
@@ -600,6 +602,10 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                 if (game_curr_round > -1) {
                     num_of_players = 0;
                 }
+
+                init_MUTEX(&lock_breakers_guessBuf);
+                init_waitqueue_head(&maker_guess_queue);
+                init_waitqueue_head(&breaker_result_queue);
 
                 spin_lock(&lock_round_started);
                 if (round_started == 1) {
