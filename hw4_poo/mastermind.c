@@ -42,6 +42,8 @@ int round_started = 0;
 int result_buffer_is_full = 0;
 unsigned long range = 0;
 
+int maker_points = 0;
+
 
 // locks:
 spinlock_t lock_codeBuf;
@@ -215,13 +217,13 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     printk("entered my_read_maker\n");
 
     // round hasn't started yet
-    spin_lock(&lock_round_started);
+    //spin_lock(&lock_round_started);
     if (!round_started) {
     	printk("in function my_read_maker: round hasn't started yet.\n");
-        spin_unlock(&lock_round_started);
+        //spin_unlock(&lock_round_started);
         return -EIO;
     }
-    spin_unlock(&lock_round_started);
+    //spin_unlock(&lock_round_started);
 
     // Don't have reading permissions
     if ((filp->f_mode & FMODE_READ) == 0) {
@@ -236,8 +238,10 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         // there isn't any breaker that can play
         spin_lock(&lock_num_of_players);
         if (!num_of_players) {
+
             maker_data->points++;
-        	printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
+
+            printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
             spin_unlock(&lock_num_of_players);
             return 0; //EOF
         // there is a breaker that can play
@@ -250,10 +254,13 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         }
     }
 
-    // copy count from kernel buffer to user space buffer.
-    // remember that the buff argument is a user-space pointer,
-    // thus we need to use copy_to_user.
-    // copy_to_user returns 0 on success
+    //spin_lock(&lock_round_started);
+    if (!round_started) {
+        printk("in function my_read_maker: round hasn't started yet.\n");
+        //spin_unlock(&lock_round_started);
+        return -EIO;
+    }
+    //spin_unlock(&lock_round_started);
 
     generateFeedback(resultBuf, guessBuf, codeBuf);
 
@@ -364,11 +371,6 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         return -EACCES;
     }
 
-    if (breaker_data->guesses <= 0) {
-    	printk("in function my_read_breaker: breaker has 0 guesses left.\n");
-        return -EPERM;
-    }
-
     if (!result_buffer_is_full) {
         // maker does not exists
         spin_lock(&lock_maker_exists);
@@ -454,13 +456,13 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     printk("my_write_breaker\n");
 
     // round hasn't started yet
-    spin_lock(&lock_round_started);
+    //spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_unlock(&lock_round_started);
+        //spin_unlock(&lock_round_started);
         printk("in function my_write_breaker: round hasn't started yet\n");
         return -EIO;
     }
-    spin_unlock(&lock_round_started);
+    //spin_unlock(&lock_round_started);
 
     if (breaker_data->curr_round < game_curr_round) {
         breaker_data->curr_round = game_curr_round;
@@ -504,14 +506,14 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     // breaker might catch the lock after the round ended,
     // in this case, exit the function.
-    spin_lock(&lock_round_started);
+    //spin_lock(&lock_round_started);
     if (!round_started) {
-        spin_unlock(&lock_round_started);
+        //spin_unlock(&lock_round_started);
         up(&lock_breakers_guessBuf);
         printk("in function my_write_breaker: round hasn't started yet\n");
         return -EIO;
     }
-    spin_unlock(&lock_round_started);
+    //spin_unlock(&lock_round_started);
 
     if (count != sizeof(guessBuf)) {
         up(&lock_breakers_guessBuf);
@@ -573,7 +575,6 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                     return -EPERM;
                 }
 
-
                 // maker_exists = 0;
                 spin_lock(&lock_guess_buffer_is_full);
                 guess_buffer_is_full = 0;
@@ -625,6 +626,7 @@ int my_release(struct inode *inode, struct file *filp)
             spin_unlock(&lock_round_started);
             return -EBUSY;
         }
+        round_started = 0;
         spin_lock(&lock_maker_exists);
         maker_exists = 0;
         spin_unlock(&lock_maker_exists);
