@@ -27,6 +27,7 @@ struct semaphore mastermind_wq_r_codemaker_sem;
 struct semaphore mastermind_wq_w_codebreaker_sem;
 
 
+
 // globals  or semaphore
 int num_codebreakers;
 int codemaker_exists;
@@ -49,9 +50,11 @@ int guess_buffer_empty;
 int guess_buffer_full;
 
 struct semaphore mastermind_sem;
+
 struct semaphore mastermind_password_buffer_sem;
 struct semaphore mastermind_feedback_buffer_sem;
 struct semaphore mastermind_guess_buffer_sem;
+
 
 struct file_operations fops_codemaker;
 struct file_operations fops_codebreaker;
@@ -90,21 +93,21 @@ int my_open(struct inode* inode, struct file* filp){
 
 
 	//fix flags to read and write
-	filp->f_flags=O_RDWR;
+	filp->f_flags = O_RDWR;
 	
 	int minor=MINOR( filp->f_dentry->d_inode->i_rdev);
 
 	// codemaker
+	
 	if (minor==0){
 		//if there is already a codemaker 
-		if(codemaker_exists==1){
+		down( &mastermind_sem);
+		if(codemaker_exists == 1){
 			//close the module
-			my_release_codemaker(inode,filp);
+			up(&mastermind_sem);
 			return -EPERM;
 		}
-
 		//there is a codemaker in the game
-		down( &mastermind_sem);
 		codemaker_exists = 1 ;
 		up(&mastermind_sem);
 
@@ -119,30 +122,26 @@ int my_open(struct inode* inode, struct file* filp){
 		//data->score=0;
 		data->rounds = num_rounds; //a verifier
 
-		// initialiser les champs
+
 	}
-	// PAS SURE
-	//data->private_key = private_key;
 	// codebreaker
 	if (minor==1){
         filp->f_op = &fops_codebreaker;
-
-
-        // update number of codebreaker
+	   
+	   	// update number of codebreaker
         down( &mastermind_sem );
-		num_codebreakers++;
+		num_codebreakers ++ ;
 		num_total_turns += 10 ;
 		up(&mastermind_sem);
-
 
 		filp->private_data=kmalloc(sizeof(my_private_data_codebreaker), GFP_KERNEL);
 		if(!filp->private_data){
 			return -ENOMEM;
 		} 
 		my_private_data_codebreaker* data = (my_private_data_codebreaker*)(filp->private_data);
-		data->minor=1;
-		data->score=0;
-		data->turns_number = 10;
+		data->minor =  1 ; 
+		data->score = 0 ;
+		data->turns_number = 10 ;
 		data->rounds = num_rounds; 
 
 	}
@@ -164,51 +163,65 @@ int my_open(struct inode* inode, struct file* filp){
 */
 int win_codebreaker(char* buff){
 	int i=0;
+	down( &mastermind_sem);
 	while(i<4){
 		if(buff[i]!='2'){
+			up( &mastermind_sem);
 			return 0;
 		}
 		i++;
 	}
+	up( &mastermind_sem);
 	return 1;
 
 }
 
 
 ssize_t my_read_codemaker(struct file *filp, char *buf, size_t count, loff_t *f_pos){
-		if (round_in_progress == 0) { 
+		down( &mastermind_sem );
+		if (round_in_progress == 0){ 
+			up(&mastermind_sem);	
 			return -EIO;
 		}
+		up(&mastermind_sem);
+
+		down(&mastermind_sem);
 		if(guess_buffer_empty){
-			if(num_codebreakers==0){
+			if(( num_codebreakers == 0)||( num_total_turns == 0 )) {
+				up(&mastermind_sem);
 				return 0; //EOF
 			}
-			else{
-			down( &mastermind_wq_r_codemaker_sem );
-			int wait_check = wait_event_interruptible(mastermind_waitqueue_r_codemaker, guess_buffer_full == 1);
-			if ( wait_check ==  -ERESTARTSYS){
+			else {
+				up(&mastermind_sem);
+				down( &mastermind_wq_r_codemaker_sem );
+				int wait_check = wait_event_interruptible(mastermind_waitqueue_r_codemaker, guess_buffer_full == 1);
+				if ( wait_check == -ERESTARTSYS){
+					up( &mastermind_wq_r_codemaker_sem );
+					return -EINTR;
+				}
 				up( &mastermind_wq_r_codemaker_sem );
-				return -EINTR;
-			}
-			up( &mastermind_wq_r_codemaker_sem );
+				down(&mastermind_sem);
 			}
 		}
+		up( &mastermind_sem);
 		// check again if round is in progress since we woke up a process
+		down( &mastermind_sem );
 		if (round_in_progress == 0) { 
+			up( &mastermind_sem );
 			return -EIO;
 		}
+		up( &mastermind_sem );
 
-		if (guess_buffer_full){
-			char resultBuf[4]= {0};
-			down(&mastermind_guess_buffer_sem); /// WHY down
-			generateFeedback(resultBuf, guess_buffer, password_buffer);
-			int res = copy_to_user(buf, resultBuf , 4) ;
-			if( res != 0 ) {
-				up(&mastermind_guess_buffer_sem);
-				return res;
-			} 
+		char resultBuf[4]= {0};
+		down(&mastermind_guess_buffer_sem); /// WHY down
+		generateFeedback(resultBuf, guess_buffer, password_buffer);
+		int res = copy_to_user(buf, resultBuf , 4) ;
+		if( res != 0 ) {
 			up(&mastermind_guess_buffer_sem);
-		}
+			return -ENOMEM;
+		} 
+		up(&mastermind_guess_buffer_sem);
+		
 		return 1;																				//mettre à jour le round_in_process
 }
 
@@ -228,53 +241,72 @@ ssize_t my_read_codemaker(struct file *filp, char *buf, size_t count, loff_t *f_
 */
 
 ssize_t my_read_codebreaker(struct file *filp, char *buf, size_t count, loff_t *f_pos){
+	down(&mastermind_sem);
 	if (round_in_progress == 0) { 
-			return -EIO;
+		up(&mastermind_sem);
+		return -EIO;
 	}	
-		//mettre à jour le round_in_process
-	
+	up(&mastermind_sem);
 
 	//the feedbakc buffer is empty
+	down(&mastermind_sem);
 	if(feedback_buffer_empty){
 		//codemaker
 		if(!codemaker_exists){
+			up(&mastermind_sem);
 			return 0; //EOF
 		}
 		//wait until the codemaker gives a feedback
 		else{
+			up(&mastermind_sem);
 			down( &mastermind_wq_r_codebreaker_sem );
 			int wait_check = wait_event_interruptible(mastermind_waitqueue_r_codebreaker , feedback_buffer_full == 1);
 			if ( wait_check ==  -ERESTARTSYS){
 				up( &mastermind_wq_r_codebreaker_sem );
 				return -EINTR;
 			}
-			up( &mastermind_wq_r_codebreaker_sem );
+			up(&mastermind_wq_r_codebreaker_sem );
+			down(&mastermind_sem);
 		}
 	}
-
+	up(&mastermind_sem);
+	
 	// check again if round is in progress since we woke up a process
+	down(&mastermind_sem);
 	if (round_in_progress == 0) { 
+		up(&mastermind_sem);
 		return -EIO;
 	}
+	up(&mastermind_sem);
+
 	//the feedback is full
 	down( &mastermind_feedback_buffer_sem);
 	int res = copy_to_user(buf, feedback_buffer, 4);
 	if( res != 0 ) {
 		up(&mastermind_feedback_buffer_sem);
-		return res;
+		return -ENOMEM;
 	} 
 
 	up(&mastermind_feedback_buffer_sem);
 
 	my_private_data_codebreaker* data = (my_private_data_codebreaker*)(filp->private_data);
-	if(win_codebreaker(feedback_buffer)){
-		down( &mastermind_sem);
-		data->score++;
+
+
+	//a verifier
+	down(&mastermind_sem);
+	data->turns_number -- ;
+	num_total_turns -- ;
+	up(&mastermind_sem);
+
+	if(win_codebreaker(feedback_buffer)){ //a verifier pas de lock
+		down( &mastermind_sem);	
 		round_in_progress = 0;
 		up(&mastermind_sem);
+		data->score++;
 	}
-	if( (data->turns_number == 0) && ( num_total_turns == 0 ) && (!win_codebreaker(feedback_buffer)) ){
-		down(&mastermind_sem);
+	if( (data -> turns_number == 0) && ( num_total_turns == 0 ) && (! win_codebreaker(feedback_buffer)) ){
+		//codemaker win
+		down( &mastermind_sem);
 		round_in_progress = 0;
 		codemaker_score ++ ; 
 		up(&mastermind_sem);
@@ -287,15 +319,7 @@ ssize_t my_read_codebreaker(struct file *filp, char *buf, size_t count, loff_t *
 	wake_up_interruptible ( &mastermind_waitqueue_w_codebreaker);
 	feedback_buffer_empty = 1; 
 	feedback_buffer_full = 0;
-	up(&mastermind_sem);
-
-
-	down(&mastermind_sem);
-	data->turns_number--;
-	num_total_turns -- ;
-	up(&mastermind_sem);
-
-	
+	up(&mastermind_sem);	
 
 	return 1;
 }
@@ -311,37 +335,48 @@ Returns 1 upon success.
 */
 ssize_t my_write_codemaker(struct file *filp, const char *buf, size_t count, loff_t *f_pos){
 
-
 if(count != 4){
-	 	return -EINVAL;
-	}
+ 	return -EINVAL;
+}
 
 //the round hasn't started
+down( &mastermind_sem);
 if (round_in_progress == 0) { 
+	up( &mastermind_sem);
 	down( &mastermind_password_buffer_sem);
 	int res = copy_from_user (password_buffer, buf, count);
 	if ( res != 0) {
 		up(&mastermind_password_buffer_sem);
-		return res;
+		return -ENOMEM;
 	}
 	up(&mastermind_password_buffer_sem);
 	return 1;
 
 }
+up( &mastermind_sem);
+
+down( &mastermind_sem);
 if( feedback_buffer_full == 1){
+	up( &mastermind_sem);
 	return -EBUSY;
 }
+up( &mastermind_sem);
+
 	//copy buff to feedback buffer
 down( &mastermind_feedback_buffer_sem);
 int res = copy_from_user(feedback_buffer, buf, count);
  if( res !=0){
  	up(&mastermind_feedback_buffer_sem);
- 	return res;
+ 	return -ENOMEM;
  } //  ou utiliser generate
+ up(&mastermind_feedback_buffer_sem);
+
+
+ down( &mastermind_sem);
  feedback_buffer_full = 1;
  feedback_buffer_empty = 0;
  wake_up_interruptible( &mastermind_waitqueue_r_codebreaker);
- up(&mastermind_feedback_buffer_sem);
+ up( &mastermind_sem);
 
 return 1;
 }
@@ -360,65 +395,98 @@ Returns 1 upon success.
 */
 
 ssize_t my_write_codebreaker(struct file *filp, const char *buf, size_t count, loff_t *f_pos){
+	down(&mastermind_sem);
 	if (round_in_progress == 0) { 
+		up(&mastermind_sem);
 		return -EIO;
 	}	
-	
+	up(&mastermind_sem);
+
 	if(count != 4){
 	 	return -EINVAL;
 	}
 
 	my_private_data_codebreaker* data = (my_private_data_codebreaker*)(filp->private_data);
 
+	down(&mastermind_sem);
 	if(num_rounds > data->rounds){
-		down( &mastermind_sem);
 		data->rounds = num_rounds;
 		// 	update number of turns
 		num_total_turns -= data->turns_number;
 		data->turns_number = 10;
-		num_total_turns += 10;
-		up( &mastermind_sem);
+		num_total_turns += 10;	
 	}
-	printk ("the turns number is %d \n ",data->turns_number);
+	up( &mastermind_sem);
+	
+	down(&mastermind_sem);
 	if(data->turns_number <= 0){
+		up( &mastermind_sem);
 		return -EPERM;
 	}
+	up( &mastermind_sem);
+
 	int i=0;
+	down(&mastermind_sem);
 	for (i=0; i<4 ; i ++){
 		if((buf[i] - '0' >= arg_color) || buf[i] - '0' < 0){
+			up( &mastermind_sem);
 			return -EINVAL;
 		}
 	}
+	up( &mastermind_sem);
 
+	down(&mastermind_sem);
 	if ((guess_buffer_full == 1) && ( codemaker_exists == 0)){
+		up( &mastermind_sem);
 		return 0; //EOF
 	}
+	up( &mastermind_sem);
 
+	down(&mastermind_sem);
 	if((guess_buffer_full == 1) && ( codemaker_exists == 1)){
+			up( &mastermind_sem);
 			down( &mastermind_wq_w_codebreaker_sem );
-			int wait_check =wait_event_interruptible( mastermind_waitqueue_w_codebreaker , guess_buffer_empty == 1 );
-			if ( wait_check ==  -ERESTARTSYS){
+			int wait_check = wait_event_interruptible ( mastermind_waitqueue_w_codebreaker , guess_buffer_empty == 1 );
+			if( wait_check ==  -ERESTARTSYS){
 				up( &mastermind_wq_w_codebreaker_sem );
 				return -EINTR;
 			}
 			up( &mastermind_wq_w_codebreaker_sem );
-
+			down(&mastermind_sem);
 	}
-	down( &mastermind_guess_buffer_sem);
-
+	up( &mastermind_sem);
 	// check again if round is in progress since we woke up a process
+	
+	down(&mastermind_sem);
 	if (round_in_progress == 0) { 
+		up(&mastermind_sem);
 		return -EIO;
+	}	
+	up(&mastermind_sem);
+
+	down(&mastermind_sem);
+	if(num_rounds > data->rounds){
+		data->rounds = num_rounds;
+		// 	update number of turns
+		num_total_turns -= data->turns_number;
+		data->turns_number = 10;
+		num_total_turns += 10;	
 	}
+	up( &mastermind_sem);
+	
+	down( &mastermind_guess_buffer_sem);
 	int res = copy_from_user (guess_buffer, buf, count) ;
 	if( res != 0){
 		up (&mastermind_guess_buffer_sem);
-		return res;
+		return -ENOMEM;
 	}
+	up (&mastermind_guess_buffer_sem);
+	
+	down(&mastermind_sem);
 	guess_buffer_full = 1;
 	guess_buffer_empty = 0;
 	wake_up_interruptible ( &mastermind_waitqueue_r_codemaker); 
-	up (&mastermind_guess_buffer_sem);
+	up(&mastermind_sem);
 	
 	return 1;
 
@@ -456,10 +524,25 @@ int my_ioctl_codemaker(struct inode *inode, struct file *filp, unsigned int cmd,
 			if( arg < 4 || arg > 10){
 				return -EINVAL;
 			}
+
+			down(&mastermind_sem);
 			arg_color = arg;
+			up(&mastermind_sem);
+
+			down(&mastermind_sem);
 			if(round_in_progress == 1){
+				up(&mastermind_sem);
 				return -EBUSY;
 			}
+			up(&mastermind_sem);
+
+			down(&mastermind_sem);
+			if( num_codebreakers <= 0){
+				up(&mastermind_sem);
+				return -EPERM;
+			}
+			up(&mastermind_sem);
+
 			down( &mastermind_sem);
 			round_in_progress = 1;
 			num_rounds++;
@@ -506,16 +589,18 @@ int my_ioctl_codebreaker(struct inode *inode, struct file *filp, unsigned int cm
 int my_release_codemaker(struct inode* inode, struct file* filp){
 	
 	// the round is in progress
+	down( &mastermind_sem);
 	if(round_in_progress==1){
+		up( &mastermind_sem);
 		return -EBUSY;
 	}
 
 	//updating global variables
-	down( &mastermind_sem);
+	
 	codemaker_exists = 0 ;
 	codemaker_score = 0 ;
+   	//round_in_progress = 0 ;
 	up( &mastermind_sem);
-
 
 	kfree(filp->private_data);
 	return 0;
@@ -524,10 +609,19 @@ int my_release_codemaker(struct inode* inode, struct file* filp){
 int my_release_codebreaker(struct inode* inode, struct file* filp){
 
 	//updating global variables
+	my_private_data_codebreaker* data = (my_private_data_codebreaker*)(filp->private_data);
 	down( &mastermind_sem);
+	num_total_turns -= data->turns_number;
 	num_codebreakers -- ;
+	if ( num_total_turns == 0) {
+		codemaker_score ++ ;  // a verifier
+		guess_buffer_empty = 1;
+		guess_buffer_full = 0;
+		feedback_buffer_empty = 1 ;
+		feedback_buffer_full = 0 ;
+		round_in_progress = 0 ; 
+	}
 	up( &mastermind_sem);
-
 	kfree(filp->private_data);
 	return 0;
 }
