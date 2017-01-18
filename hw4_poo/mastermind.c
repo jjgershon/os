@@ -685,6 +685,10 @@ int my_release(struct inode *inode, struct file *filp)
             maker_points++;
         }
 
+        if (!num_of_players) {
+            round_started = 0;
+        }
+
         printk("\nmy_release: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
         kfree(filp->private_data);
