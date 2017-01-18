@@ -213,12 +213,15 @@ int my_open (struct inode *inode, struct file *filp)
         breaker_private_data* breaker_data = filp->private_data;
         breaker_data->points = 0;
         breaker_data->guesses = 10;
-        breaker_data->curr_round = game_curr_round;
-        spin_lock(&lock_num_of_players);
-        spin_lock(&lock_round_started);
-        if (round_started == 1) {
+        if (round_started == 1 || game_curr_round == -1) {
             num_of_players++;
         }
+        if (game_curr_round > -1) {
+            breaker_data->curr_round = game_curr_round;
+        }
+
+        spin_lock(&lock_num_of_players);
+        spin_lock(&lock_round_started);
         spin_unlock(&lock_round_started);
         printk("\nmy_open: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
