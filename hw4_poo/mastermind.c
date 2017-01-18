@@ -56,6 +56,8 @@ spinlock_t lock_maker_exists;
 
 spinlock_t lock_maker_points;
 
+spinlock_t lock_maker_wait_queue;
+
 struct semaphore lock_breakers_guessBuf;
 
 wait_queue_head_t maker_guess_queue;
@@ -120,7 +122,7 @@ int init_module(void)
         return my_major;
     }
 
-    game_curr_round = 0;
+    game_curr_round = -1;
     num_of_players = 0;
     maker_exists = 0;
     guess_buffer_is_full = 0;
@@ -137,6 +139,8 @@ int init_module(void)
     spin_lock_init(&lock_maker_exists);
 
     spin_lock_init(&lock_maker_points);
+
+    spin_lock_init(&lock_maker_wait_queue);
 
     init_MUTEX(&lock_breakers_guessBuf);
     init_waitqueue_head(&maker_guess_queue);
@@ -207,9 +211,11 @@ int my_open (struct inode *inode, struct file *filp)
         breaker_private_data* breaker_data = filp->private_data;
         breaker_data->points = 0;
         breaker_data->guesses = 10;
-        breaker_data->curr_round = -1;
+        breaker_data->curr_round = game_curr_round;
         spin_lock(&lock_num_of_players);
-        //num_of_players++;
+        if (round_started == 1) {
+            num_of_players++;
+        }
         printk("\nmy_open: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
     }
@@ -259,10 +265,14 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         // there is a breaker that can play
         } else {
             spin_unlock(&lock_num_of_players);
+
+            spin_lock(&lock_maker_wait_queue);
             int wait_res = wait_event_interruptible(maker_guess_queue, guess_buffer_is_full == 1);
             if (wait_res ==  -ERESTARTSYS) {
+                spin_unlock(&lock_maker_wait_queue);
                 return -EINTR;
             }
+            spin_unlock(&lock_maker_wait_queue);
         }
     }
 
@@ -666,7 +676,15 @@ int my_release(struct inode *inode, struct file *filp)
     // minor = 1: codebreaker
     if (MINOR(inode->i_rdev) == 1) {
         spin_lock(&lock_num_of_players);
-        num_of_players--;
+        breaker_private_data* breaker_data = filp->private_data;
+        if (breaker_data->guesses > 0) {
+            num_of_players--;
+        }
+
+        if (num_of_players == 0) {
+            maker_points++;
+        }
+
         printk("\nmy_release: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
         kfree(filp->private_data);
