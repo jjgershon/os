@@ -255,9 +255,9 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         if (!num_of_players) {
 
             //maker_data->points++;
-            spin_lock(&lock_maker_points);
-            maker_points++;
-            spin_unlock(&lock_maker_points);
+            //spin_lock(&lock_maker_points);
+            //maker_points++;
+            //spin_unlock(&lock_maker_points);
 
             printk("in function my_read_maker: guessBuf is empty and there are no breakers.\n");
             spin_unlock(&lock_num_of_players);
@@ -681,7 +681,7 @@ int my_release(struct inode *inode, struct file *filp)
             num_of_players--;
         }
 
-        if (num_of_players == 0) {
+        if (num_of_players == 0 && breaker_data->guesses > 0) {
             maker_points++;
         }
 
