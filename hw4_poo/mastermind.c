@@ -15,8 +15,7 @@
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
-//#include <sys/types.h>
-//#include <unistd.h>
+
 
 #include "mastermind.h"
 #define MODULE_NAME "MASTERMIND"
@@ -213,12 +212,17 @@ int my_open (struct inode *inode, struct file *filp)
         breaker_private_data* breaker_data = filp->private_data;
         breaker_data->points = 0;
         breaker_data->guesses = 10;
+
+        spin_lock(&lock_game_curr_round);
+        spin_lock(&round_started);
         if (round_started == 1 || game_curr_round == -1) {
             num_of_players++;
         }
+        spin_ulock(&round_started);
         if (game_curr_round > -1) {
             breaker_data->curr_round = game_curr_round;
         }
+        spin_unlock(&lock_game_curr_round);
 
         spin_lock(&lock_num_of_players);
         spin_lock(&lock_round_started);
@@ -273,13 +277,13 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
         } else {
             spin_unlock(&lock_num_of_players);
 
-            spin_lock(&lock_maker_wait_queue);
+            //spin_lock(&lock_maker_wait_queue);
             int wait_res = wait_event_interruptible(maker_guess_queue, guess_buffer_is_full == 1);
             if (wait_res ==  -ERESTARTSYS) {
-                spin_unlock(&lock_maker_wait_queue);
+                //spin_unlock(&lock_maker_wait_queue);
                 return -EINTR;
             }
-            spin_unlock(&lock_maker_wait_queue);
+            //spin_unlock(&lock_maker_wait_queue);
         }
     }
 
@@ -486,6 +490,11 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     breaker_private_data* breaker_data = filp->private_data;
     printk("my_write_breaker\n");
+
+    if (breaker_data->i_write == 1) {
+        printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
+        return -EPERM; // make sure that this is the correct error
+    }
 
     // round hasn't started yet
     spin_lock(&lock_round_started);
@@ -705,6 +714,11 @@ int my_release(struct inode *inode, struct file *filp)
         }
 
         if (!num_of_players) {
+
+            init_MUTEX(&lock_breakers_guessBuf);
+            init_waitqueue_head(&maker_guess_queue);
+            init_waitqueue_head(&breaker_result_queue);
+
             spin_lock(&lock_round_started);
             round_started = 0;
             spin_unlock(&lock_round_started);
