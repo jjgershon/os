@@ -328,14 +328,14 @@ void SignalInterruptTest()
 		TEST_CHECK_(res == -1 && errno == EINTR,"Breaker shouldv'e been interrupted.Expected res=%d errno=%d\nGot res=%d errno=%d",-1,EINTR,res,errno);
 		res = read(breaker1_fd,buffer,4);
 		TEST_CHECK_(res == -1 && errno == EINTR,"Breaker shouldv'e been interrupted.Expected res=%d errno=%d\nGot res=%d errno=%d",-1,EINTR,res,errno);
-
+		//WaitMs(500);
 		exit(0);
 	}
 	WaitMs(150);//let son run.
 	kill(son,SIGINT);
 	WaitMs(150);
 	kill(son,SIGINT);
-	WaitMs(150);
+	WaitMs(100);
 	kill(son,SIGINT);
 
 	close(breaker1_fd);
@@ -484,6 +484,7 @@ void ConcurrentGameTest()
 	TEST_CHECK_(mkData.fd != -1,"Opened a maker.Got res=%d errno=%d",mkData.fd,errno);
 	mkData.expected_score = 0;
 
+	exit(0);
 	pthread_t threads[num_of_breakers+1];
 	//creating maker
 	pthread_create(&threads[0],0,MakerRoutine,&mkData);
@@ -508,10 +509,10 @@ void ConcurrentGameTest()
 
 }
 TEST_LIST ={
-		//{"BasicMasterBringUp",BasicMasterBringUp},
+		{"BasicMasterBringUp",BasicMasterBringUp},
 			{"SimpleGameTest",SimpleGameTest},
-			//{"BreakerWriteEIOTest",BreakerWriteEIOTest},
-			//{"SignalInterruptTest",SignalInterruptTest},
-			//{"ConcurrentGameTest",ConcurrentGameTest},
+			{"BreakerWriteEIOTest",BreakerWriteEIOTest},
+			{"SignalInterruptTest",SignalInterruptTest},
+			{"ConcurrentGameTest",ConcurrentGameTest},
 		{0}
 };
