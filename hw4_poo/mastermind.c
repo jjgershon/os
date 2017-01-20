@@ -43,6 +43,7 @@ int round_started = 0;
 int result_buffer_is_full = 0;
 unsigned long range = 0;
 int maker_points = 0;
+int total_num_of_players = 0;
 
 
 // locks:
@@ -130,6 +131,7 @@ int init_module(void)
     round_started = 0;
     result_buffer_is_full = 0;
     maker_points = 0;
+    total_num_of_players = 0;
 
     spin_lock_init(&lock_num_of_players);
     spin_lock_init(&lock_guess_buffer_is_full);
@@ -215,20 +217,19 @@ int my_open (struct inode *inode, struct file *filp)
 
         //spin_lock(&lock_game_curr_round);
         spin_lock(&round_started);
+        spin_lock(&lock_num_of_players);
         if (round_started == 1 || game_curr_round == -1) {
             num_of_players++;
         }
+        spin_unlock(&lock_num_of_players);
         spin_unlock(&round_started);
         if (game_curr_round > -1) {
             breaker_data->curr_round = game_curr_round;
         }
         //spin_unlock(&lock_game_curr_round);
+        total_num_of_players++;
 
-        spin_lock(&lock_num_of_players);
-        spin_lock(&lock_round_started);
-        spin_unlock(&lock_round_started);
         printk("\nmy_open: num_of_players=%d\n",num_of_players);
-        spin_unlock(&lock_num_of_players);
     }
     printk("\nopen finished successfuly\n");
     return 0;
@@ -476,6 +477,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
     }
 
     //
+    spin_lock(&lock_num_of_players);
     if (!num_of_players && guess_is_correct == 0) {
         spin_lock(&lock_round_started);
         round_started = 0;
@@ -485,6 +487,7 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
         maker_points++;
         spin_unlock(&lock_maker_points);
     }
+    spin_unlock(&lock_num_of_players);
 
     // empty guessBuf and resultBuf
     spin_lock(&lock_guess_buffer_is_full);
@@ -600,10 +603,12 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     // lowering the number of guesses
     --breaker_data->guesses;
 
+    spin_lock(&lock_num_of_players);
     if (!breaker_data->guesses) {
         num_of_players--;
         printk("\nmy_write_breaker: num_of_players=%d\n",num_of_players);
     }
+    spin_unlock(&lock_num_of_players);
 
     spin_lock(&lock_guess_buffer_is_full);
     guess_buffer_is_full = 1;
@@ -623,7 +628,7 @@ loff_t my_llseek(struct file *filp, loff_t a, int num)
 
 int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    printk("\nentered ioctl\n");
+    printk("\nenter our ioctl\n");
 
     switch (cmd) {
         case ROUND_START:
@@ -633,17 +638,22 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                 if (arg < 4 || arg > 10) {
                     return -EINVAL;
                 }
-                range = arg;
 
                 // 20.1.17 start
-                if (!num_of_players) {
+
+                if (total_num_of_players == 0) {
                     return -EPERM;
                 }
                 // 20.1.17 end
 
+                range = arg;
+
+                spin_lock(&lock_num_of_players);
                 if (game_curr_round > -1) {
                     num_of_players = 0;
                 }
+
+                spin_unlock(&lock_num_of_players);
 
                 init_MUTEX(&lock_breakers_guessBuf);
                 init_waitqueue_head(&maker_guess_queue);
@@ -706,7 +716,7 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
 
 int my_release(struct inode *inode, struct file *filp)
 {
-    printk("\nenter ioctl\n");
+    printk("\nenter my_release\n");
     // minor = 0: codemaker
     if (MINOR(inode->i_rdev) == 0) {
         spin_lock(&lock_round_started);
@@ -715,7 +725,9 @@ int my_release(struct inode *inode, struct file *filp)
             return -EBUSY;
         }
         round_started = 0;
+        spin_lock(&lock_num_of_players);
         num_of_players = 0;
+        spin_unlock(&lock_num_of_players);
         game_curr_round = -1;
 
         guess_buffer_is_full = 0;
@@ -733,6 +745,7 @@ int my_release(struct inode *inode, struct file *filp)
     }
     // minor = 1: codebreaker
     if (MINOR(inode->i_rdev) == 1) {
+        total_num_of_players--;
         spin_lock(&lock_num_of_players);
         breaker_private_data* breaker_data = filp->private_data;
         if (breaker_data->guesses > 0) {
@@ -743,6 +756,7 @@ int my_release(struct inode *inode, struct file *filp)
             maker_points++;
         }
 
+        spin_lock(&lock_num_of_players);
         if (!num_of_players) {
 
             init_MUTEX(&lock_breakers_guessBuf);
@@ -755,6 +769,7 @@ int my_release(struct inode *inode, struct file *filp)
             guess_buffer_is_full = 0;
             result_buffer_is_full = 0;
         }
+        spin_unlock(&lock_num_of_players);
 
         printk("\nmy_release: num_of_players=%d\n",num_of_players);
         spin_unlock(&lock_num_of_players);
