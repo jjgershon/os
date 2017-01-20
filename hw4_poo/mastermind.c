@@ -515,10 +515,10 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
     }
     // 20.1.17 start
 
-    if (breaker_data->i_write == 1) {
-        printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
-        return -EPERM; // make sure that this is the correct error
-    }
+    // if (breaker_data->i_write == 1) {
+    //     printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
+    //     return -EPERM; // make sure that this is the correct error
+    // }
 
     // round hasn't started yet
     spin_lock(&lock_round_started);

@@ -65,6 +65,103 @@ void SetParams()
 //End of setting environment
 //Tests here
 
+void FailToStartRoundWhenNoBreakers()
+{
+	/*https://piazza.com/class/itwmqc4kxp97pj?cid=332*/
+
+	int maker_fd=open(utils.ParamToString("maker_path").c_str(),O_RDWR);
+	int res;
+
+	TEST_CHECK_(maker_fd != -1,"Opened a maker.Expected to succeed. got errno=%d",errno);
+
+	res = ioctl(maker_fd, ROUND_START, 5);
+	TEST_CHECK_(-1 == res && EPERM == errno,
+		"Maker tried to start round with no breakers should fail with errno=%d got return value=%d and errno=%d(%s)\n",
+			EPERM, res, errno, strerror(errno));
+
+	int breaker_fd = open(utils.ParamToString("breaker_path").c_str(),O_RDWR);
+
+	res = ioctl(maker_fd,ROUND_START,5);
+	TEST_CHECK_(res > 0,"Maker started a round - expected to succeed.Got res=%d errno=%d",res,errno);
+
+	TEST_CHECK_(0 == close(breaker_fd), "Breaker should succeed closing got errno=%d", errno);
+
+	res = ioctl(maker_fd,GET_MY_SCORE,0);
+
+	TEST_CHECK_(1 == res, "Maker should have received point");
+
+	res = ioctl(maker_fd, ROUND_START, 5);
+	TEST_CHECK_(-1 == res && EPERM == errno,
+		"Maker tried to start round with no breakers should fail with errno=%d got return value=%d and errno=%d(%s)\n",
+			EPERM, res, errno, strerror(errno));
+
+	breaker_fd = open(utils.ParamToString("breaker_path").c_str(),O_RDWR);
+
+	for (int round = 0; round < 2; ++round)
+	{
+		res = ioctl(maker_fd,ROUND_START,5);
+		TEST_CHECK_(res > 0,"Maker started a round %d - expected to succeed.Got res=%d errno=%d",res,errno);
+
+		for (int i = 0; i < 10; ++i) {
+			TEST_CHECK_(1 <= write(breaker_fd,"1313",4), "Breaker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+			char feedback[4];
+			TEST_CHECK_(1 <= read(maker_fd,feedback,4), "Maker read should have succeed  errno=%d (%s)", errno, strerror(errno));
+			TEST_CHECK_(1 <= write(maker_fd,feedback,4), "Maker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+			TEST_CHECK_(1 <= read(breaker_fd,feedback,4), "Breaker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+		}
+
+		TEST_CHECK_(2 + round == ioctl(maker_fd,GET_MY_SCORE,0), "Maker should have received point");
+		TEST_CHECK_(0 == ioctl(breaker_fd,GET_MY_SCORE,0), "breaker should not receive points");
+	}
+
+	TEST_CHECK_(0 == close(breaker_fd), "Breaker should succeed closing got errno=%d", errno);
+
+	res = ioctl(maker_fd, ROUND_START, 5);
+	TEST_CHECK_(-1 == res && EPERM == errno,
+		"Maker tried to start round with no breakers should fail with errno=%d got return value=%d and errno=%d(%s)\n",
+			EPERM, res, errno, strerror(errno));
+
+	TEST_CHECK_(0 == close(maker_fd), "Maker should succeed closing got errno=%d", errno);
+}
+
+void PassingNullAsBuffer()
+{
+	/*https://piazza.com/class/itwmqc4kxp97pj?cid=332*/
+
+	int maker_fd=open(utils.ParamToString("maker_path").c_str(),O_RDWR);
+	int breaker_fd = open(utils.ParamToString("breaker_path").c_str(),O_RDWR);
+	int res;
+
+	res = ioctl(maker_fd,ROUND_START,5);
+	TEST_CHECK_(res > 0,"Maker started a round %d - expected to succeed.Got res=%d errno=%d",res,errno);
+
+
+	res = write(breaker_fd, NULL, 4);
+	TEST_CHECK_(-1 == res && EINVAL == errno, "Expected %s while passing null got ret=%d (%s)", strerror(EINVAL), res, strerror(errno));
+
+	TEST_CHECK_(1 <= write(breaker_fd,"0000",4), "Breaker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+
+	res = read(maker_fd, NULL, 4);
+	TEST_CHECK_(-1 == res && EINVAL == errno, "Expected %s while passing null got ret=%d (%s)", strerror(EINVAL), res, strerror(errno));
+
+	char feedback[4];
+
+	TEST_CHECK_(1 <= read(maker_fd,feedback, 4), "Maker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+
+	res = write(maker_fd, NULL, 4);
+	TEST_CHECK_(-1 == res && EINVAL == errno, "Expected %s while passing null got ret=%d (%s)", strerror(EINVAL), res, strerror(errno));
+
+	TEST_CHECK_(1 <= write(maker_fd,feedback,4), "Maker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+
+	res = read(breaker_fd, NULL, 4);
+	TEST_CHECK_(-1 == res && EINVAL == errno, "Expected %s while passing null got ret=%d (%s)", strerror(EINVAL), res, strerror(errno));
+
+	TEST_CHECK_(1 <= read(breaker_fd,feedback, 4), "Breaker write should have succeed  errno=%d (%s)", errno, strerror(errno));
+
+	TEST_CHECK_(0 == close(breaker_fd), "Breaker should succeed closing got errno=%d", errno);
+	TEST_CHECK_(0 == close(maker_fd), "Maker should succeed closing got errno=%d", errno);
+}
+
 void BasicMasterBringUp()
 {
 	int maker_fd=open(utils.ParamToString("maker_path").c_str(),O_RDWR);
@@ -328,14 +425,14 @@ void SignalInterruptTest()
 		TEST_CHECK_(res == -1 && errno == EINTR,"Breaker shouldv'e been interrupted.Expected res=%d errno=%d\nGot res=%d errno=%d",-1,EINTR,res,errno);
 		res = read(breaker1_fd,buffer,4);
 		TEST_CHECK_(res == -1 && errno == EINTR,"Breaker shouldv'e been interrupted.Expected res=%d errno=%d\nGot res=%d errno=%d",-1,EINTR,res,errno);
-		//WaitMs(500);
+
 		exit(0);
 	}
 	WaitMs(150);//let son run.
 	kill(son,SIGINT);
 	WaitMs(150);
 	kill(son,SIGINT);
-	WaitMs(100);
+	WaitMs(150);
 	kill(son,SIGINT);
 
 	close(breaker1_fd);
@@ -484,7 +581,6 @@ void ConcurrentGameTest()
 	TEST_CHECK_(mkData.fd != -1,"Opened a maker.Got res=%d errno=%d",mkData.fd,errno);
 	mkData.expected_score = 0;
 
-	exit(0);
 	pthread_t threads[num_of_breakers+1];
 	//creating maker
 	pthread_create(&threads[0],0,MakerRoutine,&mkData);
@@ -508,11 +604,14 @@ void ConcurrentGameTest()
 	pthread_mutex_destroy(&global_mut);
 
 }
+
 TEST_LIST ={
-		{"BasicMasterBringUp",BasicMasterBringUp},
-			{"SimpleGameTest",SimpleGameTest},
-			{"BreakerWriteEIOTest",BreakerWriteEIOTest},
-			{"SignalInterruptTest",SignalInterruptTest},
+		    //{"FailToStartRoundWhenNoBreakers", FailToStartRoundWhenNoBreakers},
+			//{"PassingNullAsBuffer", PassingNullAsBuffer},
+			//{"BasicMasterBringUp",BasicMasterBringUp},
+			//{"SimpleGameTest",SimpleGameTest},
+			//{"BreakerWriteEIOTest",BreakerWriteEIOTest},
+			//{"SignalInterruptTest",SignalInterruptTest},
 			{"ConcurrentGameTest",ConcurrentGameTest},
 		{0}
 };
