@@ -115,8 +115,6 @@ struct file_operations my_fops_breaker = {
 
 int init_module(void)
 {
-    printk("\ninitializing module\n");
-
     my_major = register_chrdev(my_major, MODULE_NAME, &my_fops_maker);
 
     // can't get dynamic major
@@ -149,8 +147,6 @@ int init_module(void)
     init_waitqueue_head(&maker_guess_queue);
     init_waitqueue_head(&breaker_result_queue);
 
-    printk("\nmodule loaded successfuly\n");
-
     return 0;
 }
 
@@ -165,11 +161,8 @@ void cleanup_module(void)
 
 int my_open (struct inode *inode, struct file *filp)
 {
-    printk("\nDEBUG: entered my_open\n");
-
     // check flag
     if (!filp->f_flags & O_RDWR){
-    	printk("in function my_open: doesn't have O_RDWR permissions.\n");
         return -EPERM;
     }
 
