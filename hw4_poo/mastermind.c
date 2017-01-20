@@ -213,16 +213,16 @@ int my_open (struct inode *inode, struct file *filp)
         breaker_data->points = 0;
         breaker_data->guesses = 10;
 
-        spin_lock(&lock_game_curr_round);
+        //spin_lock(&lock_game_curr_round);
         spin_lock(&round_started);
         if (round_started == 1 || game_curr_round == -1) {
             num_of_players++;
         }
-        spin_ulock(&round_started);
+        spin_unlock(&round_started);
         if (game_curr_round > -1) {
             breaker_data->curr_round = game_curr_round;
         }
-        spin_unlock(&lock_game_curr_round);
+        //spin_unlock(&lock_game_curr_round);
 
         spin_lock(&lock_num_of_players);
         spin_lock(&lock_round_started);
@@ -241,6 +241,12 @@ ssize_t my_read_maker(struct file *filp, char *buf, size_t count, loff_t *f_pos)
     // maker reads from guess buffer and writes it into buf
 
     printk("entered my_read_maker\n");
+
+    // 20.1.17 start
+    if (!buf) {
+        return -EINVAL;
+    }
+    // 20.1.17 start
 
     // round hasn't started yet
     spin_lock(&lock_round_started);
@@ -313,6 +319,12 @@ ssize_t my_write_maker(struct file *filp, const char *buf, size_t count, loff_t 
     printk("my_write_maker\n");
     // reads from buf and writes it into result
 
+    // 20.1.17 start
+    if (!buf) {
+        return -EINVAL;
+    }
+    // 20.1.17 start
+
     // If the round hasn’t started - write the contents of buf into the
     // password buffer:
     spin_lock(&lock_round_started);
@@ -380,6 +392,12 @@ ssize_t my_read_breaker(struct file *filp, char *buf, size_t count, loff_t *f_po
 {
     // resultBuf(kernel mode) ---> buf(user mode)
     printk("\nentered my_read_breaker\n");
+
+    // 20.1.17 start
+    if (!buf) {
+        return -EINVAL;
+    }
+    // 20.1.17 start
 
     // round hasn't started yet
     spin_lock(&lock_round_started);
@@ -490,6 +508,12 @@ ssize_t my_write_breaker(struct file *filp, const char *buf, size_t count, loff_
 
     breaker_private_data* breaker_data = filp->private_data;
     printk("my_write_breaker\n");
+
+    // 20.1.17 start
+    if (!buf) {
+        return -EINVAL;
+    }
+    // 20.1.17 start
 
     if (breaker_data->i_write == 1) {
         printk("in function my_read_breaker: wrong breaker- i_write = 0.\n");
@@ -610,6 +634,12 @@ int my_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned 
                     return -EINVAL;
                 }
                 range = arg;
+
+                // 20.1.17 start
+                if (!num_of_players) {
+                    return -EPERM;
+                }
+                // 20.1.17 end
 
                 if (game_curr_round > -1) {
                     num_of_players = 0;
